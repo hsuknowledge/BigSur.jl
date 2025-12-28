@@ -53,8 +53,8 @@ function calculator_modifiedcorrected_PCC(_mcϕi)
     function (i1, i2)
         c, cache = _mcϕi.c[1], _mcϕi.cache
         tmapreduce(+, 1:_mcϕi.n) do j
-            mapreduce(i -> _mcϕi._Pij(i, j, c) / cache[i], *, [i1, i2])
-        end
+            mapreduce(i -> _mcϕi._Pij(i, j, c) / sqrt(cache[i]), *, [i1, i2])
+        end / (_mcϕi.n - 1)
     end
 end
 
