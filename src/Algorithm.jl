@@ -62,34 +62,34 @@ end
 
 @inline function stirlings2(k_upto)
     table = zeros(Int, k_upto+1, k_upto+1)
-    for k in 0:k_upto; for a in 0:k
-        table[k+1, a+1] = Combinatorics.stirlings2(k, a)
+    for k in 0:k_upto; for j in 0:k
+        table[k+1, j+1] = Combinatorics.stirlings2(k, j)
     end end
     table
 end
 
 @inline function poissonLogNormal_moment(k, m, c, stirlings2)
     chi = 1 + c^2
-    mapreduce(a -> stirlings2[k+1, a+1] * chi^(a*(a-1)/2) * m^a, +, 0:k)
+    mapreduce(j -> stirlings2[k+1, j+1] * chi^(j*(j-1)/2) * m^j, +, 0:k)
 end
 
 @inline function unaveraged_Fano_cumulants(m, c, tmp, stirlings2)
     div = m * noise_factor(m, c) # * (n - 1) for actual moments/cumulants
-    @views r, e, k = tmp[1:13], tmp[14:19], tmp[20:25]
+    @views r, e, q = tmp[1:13], tmp[14:19], tmp[20:25]
     map!(r, 0:12) do k; poissonLogNormal_moment(k, m, c, stirlings2) end
     map!(e, 1:6) do k
-        mapreduce(a -> binomial(2k, a) * (-m)^(2k-a) * r[a+1], +, 0:2k) / div^k
+        mapreduce(i -> binomial(2k, i) * (-m)^(2k-i) * r[i+1], +, 0:2k) / div^k
     end
-    k[1] = e[1]
-    k[2] = -e[1]^2 + e[2]
-    k[3] = 2e[1]^3 - 3e[2]e[1] + e[3]
-    k[4] = -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4]
-    k[5] = 24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] +
+    q[1] = e[1]
+    q[2] = -e[1]^2 + e[2]
+    q[3] = 2e[1]^3 - 3e[2]e[1] + e[3]
+    q[4] = -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4]
+    q[5] = 24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] +
              30e[2]^2e[1] - 5e[4]e[1] + e[5]
-    k[6] = -120e[1]^6 + 360e[2]e[1]^4 - 270e[2]^2e[1]^2 +
+    q[6] = -120e[1]^6 + 360e[2]e[1]^4 - 270e[2]^2e[1]^2 +
              30e[2]^3 - 120e[3]e[1]^3 + 120e[3]e[2]e[1] - 10e[3]^2 +
              30e[4]e[1]^2 - 15e[4]e[2] - 6e[5]e[1] + e[6]
-    k
+    q
 end
 
 function calculator_nulldistribution_Fano(fun_mcϕi)
@@ -101,6 +101,7 @@ function calculator_nulldistribution_Fano(fun_mcϕi)
             @local tmp = zeros(13+6+6)
             unaveraged_Fano_cumulants(fn_mu(i, j), c, tmp, S2)
         end
+        μ = k[1] / (n - 1) # == n/(n-1)
         sk2 = sqrt(k[2])
         sd = sk2 / (n - 1)
         # Skewness, excess kurtosis and so on, over powers of SD
@@ -126,7 +127,7 @@ function calculator_nulldistribution_Fano(fun_mcϕi)
         # therefore we will find roots to this function minus the observed mcFano.
         # This function maps a standard Normal quantile x to the new distribution.
         # The weight on SD is a polynomial of x, whose first term x == He1.
-        f = n / (n - 1) + sd * mapreduce(*, +,
+        f = μ + sd * mapreduce(*, +,
             [He1, h1, h2,  h11, h3,   h12, h111, h4,  h22,   h13,   h112, h1111],
               [1, γ1, γ2, γ1^2, γ3, γ1*γ2, γ1^3, γ4, γ2^2, γ1*γ3, γ2*γ1^2, γ1^4])
         # pval = ccdf(Normal(), min_abs_real(roots(f(i) - mcFano[i])))
