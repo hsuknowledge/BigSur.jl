@@ -22,16 +22,18 @@ function findVariableGenes(mat::AbstractMatrix{T}, names;
     @info "finding fit for c in " * string(length(sub_rows)) * " genes"
     @time @info optimize_c_for_Fano!(calc_fano, sub_rows)
     @info "using this c to calculate modified corrected Fano factors for all"
-    calc_fano_cumulant = calculator_unaveraged_Fano_cumulants(calc_fano)
-    calc_fano_cfpoly = calculator_Fano_CornishFisher(calc_fano_cumulant)
+    mcFano = calc_fano.cache
+    nulldistribution_fano = calculator_nulldistribution_Fano(calc_fano)
     root = map(1:m) do i
-        r = filter(x -> x.im == 0, roots(calc_fano_cfpoly(i)))
+        r = filter(x -> x.im == 0, roots(nulldistribution_fano(i) - mcFano[i]))
         length(r) == 0 ? 0 : minimum(abs.(r))
     end
     pval = map(x -> ccdf(Normal(), x), root)
     padj = adjust(pval, BenjaminiHochberg())
     hvg = @. calc_fano.cache >= min_fano && padj <= FDR
-    DataFrame("names" => names, "mcFano" => calc_fano.cache, "root" => root,
+    cs = zero(pval)
+    fill!(cs, calc_fano.c[1])
+    DataFrame("names" => names, "mcFano" => mcFano, "c" => cs, "root" => root,
               "p_val" => pval, "padj_BH" => padj, "highly_variable" => hvg)
 end
 

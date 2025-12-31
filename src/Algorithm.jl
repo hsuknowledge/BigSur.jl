@@ -1,6 +1,8 @@
 function calculator_expected_counts(mat::AbstractMatrix{T}) where {T<:Number}
     gene_totals = sum(mat, dims = 2) |> vec
     cell_totals = sum(mat, dims = 1) |> vec
+    @assert all(gene_totals .> 0) "Some genes have zero counts. Please remove them."
+    @assert all(cell_totals .> 0) "Some cells have zero counts. Please remove them."
     total = sum(cell_totals)
     @inline function (i, j)
         @boundscheck checkbounds(mat, i, j)
@@ -71,45 +73,39 @@ end
     mapreduce(a -> stirlings2[k+1, a+1] * chi^(a*(a-1)/2) * m^a, +, 0:k)
 end
 
-function calculator_unaveraged_Fano_cumulants(fun_mcϕi)
-    S2 = stirlings2(12)
-    @inline function(i, j, tmp)
-        c = fun_mcϕi.c[1]
-        m = fun_mcϕi.fun_μij(i, j)
-        mcm = m * noise_factor(m, c)
-        @views r, e, k = tmp[1:13], tmp[14:19], tmp[20:25]
-        map!(r, 0:12) do k; poissonLogNormal_moment(k, m, c, S2) end
-        map!(e, 1:6) do k
-            mapreduce(a -> binomial(2k, a) * (-m)^(2k-a) * r[a+1], +, 0:2k) / mcm^k
-        end
-        # kappa1 to kappa6 summands of each cell j at gene i
-        k[1] = e[1] # e[1] == 1
-        k[2] = -e[1]^2 + e[2]
-        k[3] = 2e[1]^3 - 3e[2]e[1] + e[3]
-        k[4] = -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4]
-        k[5] = 24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] +
-                 30e[2]^2e[1] - 5e[4]e[1] + e[5]
-        k[6] = -120e[1]^6 + 360e[2]e[1]^4 - 270e[2]^2e[1]^2 +
-                 30e[2]^3 - 120e[3]e[1]^3 + 120e[3]e[2]e[1] - 10e[3]^2 +
-                 30e[4]e[1]^2 - 15e[4]e[2] - 6e[5]e[1] + e[6]
-        k
-        # The actual cumulants are lower by a factor of (n-1)^k,
-        # but since that would cancel each other out in the CF coefficients,
-        # we are skipping this denominator, hence the name "unaveraged."
+@inline function unaveraged_Fano_cumulants(m, c, tmp, stirlings2)
+    div = m * noise_factor(m, c) # * (n - 1) for actual moments/cumulants
+    @views r, e, k = tmp[1:13], tmp[14:19], tmp[20:25]
+    map!(r, 0:12) do k; poissonLogNormal_moment(k, m, c, stirlings2) end
+    map!(e, 1:6) do k
+        mapreduce(a -> binomial(2k, a) * (-m)^(2k-a) * r[a+1], +, 0:2k) / div^k
     end
+    k[1] = e[1]
+    k[2] = -e[1]^2 + e[2]
+    k[3] = 2e[1]^3 - 3e[2]e[1] + e[3]
+    k[4] = -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4]
+    k[5] = 24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] +
+             30e[2]^2e[1] - 5e[4]e[1] + e[5]
+    k[6] = -120e[1]^6 + 360e[2]e[1]^4 - 270e[2]^2e[1]^2 +
+             30e[2]^3 - 120e[3]e[1]^3 + 120e[3]e[2]e[1] - 10e[3]^2 +
+             30e[4]e[1]^2 - 15e[4]e[2] - 6e[5]e[1] + e[6]
+    k
 end
 
-function calculator_Fano_CornishFisher(fun_κϕij)
+function calculator_nulldistribution_Fano(fun_mcϕi)
+    S2 = stirlings2(12)
     @inline function(i)
-        n, mcϕi = fun_κϕij.fun_mcϕi.n, fun_κϕij.fun_mcϕi.cache[i]
+        n, c, fn_mu = fun_mcϕi.n, fun_mcϕi.c[1], fun_mcϕi.fun_μij
         k = @tasks for j in 1:n
             @set reducer = +
             @local tmp = zeros(13+6+6)
-            fun_κϕij(i, j, tmp)
+            unaveraged_Fano_cumulants(fn_mu(i, j), c, tmp, S2)
         end
         sk2 = sqrt(k[2])
         sd = sk2 / (n - 1)
         # Skewness, excess kurtosis and so on, over powers of SD
+        # The averaging factors (n-1)^k cancel out in these ratios,
+        # therefore we skip dividing by them in moments/cumulants.
         γ1 = k[3] / sk2^3
         γ2 = k[4] / sk2^4
         γ3 = k[5] / sk2^5
@@ -125,10 +121,14 @@ function calculator_Fano_CornishFisher(fun_κϕij)
         h3, h12, h111 = He4/120, -(He4 + He2)/24, (12He4 + 19He2)/324
         h4, h22, h13  = He5/720, -(3He5 + 6He3 + 2He1)/384, -(2He5 + 3He3)/180
         h112, h1111 = (14He5 + 37He3 + 8He1)/288, -(252He5 + 832He3 + 227He1)/7776
-        # first term in the weight, x, is equivalent to polynomial He1
-        f = 1 - mcϕi + sd * mapreduce(*, +,
+        # Quantile function: we want to know what quantile an observed mcFano is,
+        # on the null distribution which has n/(n-1) mean and this particular SD,
+        # therefore we will find roots to this function minus the observed mcFano.
+        # This function maps a standard Normal quantile x to the new distribution.
+        # The weight on SD is a polynomial of x, whose first term x == He1.
+        f = n / (n - 1) + sd * mapreduce(*, +,
             [He1, h1, h2,  h11, h3,   h12, h111, h4,  h22,   h13,   h112, h1111],
               [1, γ1, γ2, γ1^2, γ3, γ1*γ2, γ1^3, γ4, γ2^2, γ1*γ3, γ2*γ1^2, γ1^4])
-        #ccdf(Normal(), roots(f))
+        # pval = ccdf(Normal(), min_abs_real(roots(f(i) - mcFano[i])))
     end
 end
