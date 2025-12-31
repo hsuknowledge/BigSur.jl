@@ -1,7 +1,7 @@
 [deps]
 Combinatorics = "861a8166-3701-5b0c-9a16-15d98fcdc6aa"
-CurveFit = "5a033b19-8c74-5913-a970-47c3779ef25c"
+GLM = "38e38edf-8417-5370-95a0-9cbb8c7f171a"
 MultipleTesting = "f8716d33-7c4a-5097-896f-ce0ecbd3ef6b"
 OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
-Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
+Polynomials = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"

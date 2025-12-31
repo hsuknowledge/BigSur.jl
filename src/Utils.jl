@@ -1,3 +1,7 @@
+import Arrow
+using DataFrames: DataFrame
+using SparseArrays: SparseMatrixCSC
+
 function import_CSC_Matrix(df::DataFrame, row::Integer = 1)
     @assert names(df) == ["rowname", "colname", "rowidx", "colptr", "value"]
     m = length(df.rowname[row])

@@ -8,17 +8,13 @@ function calculator_expected_counts(mat::AbstractMatrix{T}) where {T<:Number}
     end
 end
 
-function calculator_Pearson_residuals(_μij)
-    @inline function (i, j, c)
-        @boundscheck checkbounds(_μij.mat, i, j)
-        μij = _μij(i, j)
-        (_μij.mat[i, j] - μij) / sqrt(μij * (1 + c^2 * μij))
-    end
-end
+@inline noise_factor(mu, c) = 1 + c^2 * mu
+@inline pearson_residual(x, mu, c) = (x - mu) / sqrt(mu * noise_factor(mu, c))
 
-function calculator_modifiedcorrected_Fano(_Pij)
-    m, n = size(_Pij._μij.mat)
-    T = typeof(_Pij._μij.total)
+function calculator_modifiedcorrected_Fano(fun_μij)
+    mat = fun_μij.mat
+    m, n = size(mat)
+    T = typeof(fun_μij.total)
     c = zeros(T, 1)
     cache = zeros(T, m)
     function (c_search = c[1], rows = nothing)
@@ -26,88 +22,113 @@ function calculator_modifiedcorrected_Fano(_Pij)
         if c[1] != c_search # simply overwrite the cached value
             c[1] = c_search
             @views tmap!(cache[rows], rows) do i
-                mapreduce(j -> _Pij(i, j, c_search)^2, +, 1:n) / (n - 1)
+                mapreduce(+, 1:n) do j
+                    pearson_residual(mat[i, j], fun_μij(i, j), c_search)^2
+                end / (n - 1)
             end
         end
         @views cache[rows]
     end
 end
 
-function optimize_c_for_Fano!(_mcϕi, sub_rows)
-    X = _mcϕi._Pij._μij.gene_totals[sub_rows] ./ _mcϕi.m
+function optimize_c_for_Fano!(fun_mcϕi, sub_rows)
+    X = fun_mcϕi.fun_μij.gene_totals[sub_rows] ./ fun_mcϕi.m
     function objective(c)
-        Y = _mcϕi(c, sub_rows)
-        prob = CurveFitProblem(X, Y)
-        sol = solve(prob, PowerCurveFitAlgorithm())
-        slope = sol.u[1]
+        Y = fun_mcϕi(c, sub_rows)
+        model = lm(@formula(y ~ x), (; x = log10.(X), y = log10.(Y)))
+        slope = coef(model)[2]
         abs(slope)
     end
     result = optimize(objective, 0, 1)
     c = result.minimizer
-    _mcϕi(c) # not returned; instead, fanos_calc.cache is always accessible
+    fun_mcϕi(c) # not returned; instead, fanos_calc.cache is always accessible
     (; c = c, best_slope = result.minimum)
 end
 
-function calculator_modifiedcorrected_PCC(_mcϕi)
+function calculator_modifiedcorrected_PCC(fun_mcϕi)
     # inner product of rows i1 and i2 of residuals divided by respective fanos
     function (i1, i2)
-        c, cache = _mcϕi.c[1], _mcϕi.cache
-        tmapreduce(+, 1:_mcϕi.n) do j
-            mapreduce(i -> _mcϕi._Pij(i, j, c) / sqrt(cache[i]), *, [i1, i2])
-        end / (_mcϕi.n - 1)
-    end
-end
-
-function calculator_PoissonLogNormal_moments(_mcϕi)
-    chi = 1 + _mcϕi.c[1]^2
-    @inline function (i, j)
-        m = _mcϕi._Pij._μij(i, j)
-        # note we return a vector with indices 1:11 for r[0] to r[10],
-        # needed for the 5 moments of modified corrected fano factors
-        map(0:10) do k
-            mapreduce(a -> stirlings2(k, a) * chi^(a*(a-1)/2) * m^a, +, 0:k)
-        end
-    end
-end
-
-function calculator_Fano_cumulants_halfway(_PLNrij)
-    @inline function(i)
-        data = _PLNrij._mcϕi
-        tmapreduce(+, 1:data.n) do j
-            r = _PLNrij(i, j)
-            m = data._Pij._μij(i, j)
-            mcm = m + (data.c[1]m)^2
-            e = map(1:5) do k
-                mapreduce(a -> binomial(2k, a) * (-m)^(2k-a) * r[a+1], +, 0:2k) / mcm^k
+        f = fun_mcϕi
+        mat, n, c, cache, mu = f.mat, f.n, f.c[1], f.cache, f.fun_μij
+        tmapreduce(+, 1:n) do j
+            mapreduce(*, [i1, i2]) do i
+                pearson_residual(mat[i, j], mu(i, j), c) / sqrt(cache[i])
             end
-            [ # kappa1 to 5 summands of each cell at gene i
-                e[1], # e[1] == 1
-                -e[1]^2 + e[2],
-                2e[1]^3 - 3e[2]e[1] + e[3],
-                -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4],
-                24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] + 5(6e[2]^2-e[4])e[1] + e[5]
-            ]
-        end # ./ map(k -> (data.n - 1)^k, 1:5)
-        # We skip the denominators, knowing they would cancel each other out.
-        # The resulting numbers are not the actual cumulant values.
+        end / (n - 1)
     end
 end
 
-function calculator_Fano_CornishFisher(_κϕi)
+@inline function stirlings2(k_upto)
+    table = zeros(Int, k_upto+1, k_upto+1)
+    for k in 0:k_upto; for a in 0:k
+        table[k+1, a+1] = Combinatorics.stirlings2(k, a)
+    end end
+    table
+end
+
+@inline function poissonLogNormal_moment(k, m, c, stirlings2)
+    chi = 1 + c^2
+    mapreduce(a -> stirlings2[k+1, a+1] * chi^(a*(a-1)/2) * m^a, +, 0:k)
+end
+
+function calculator_unaveraged_Fano_cumulants(fun_mcϕi)
+    S2 = stirlings2(12)
+    @inline function(i, j, tmp)
+        c = fun_mcϕi.c[1]
+        m = fun_mcϕi.fun_μij(i, j)
+        mcm = m * noise_factor(m, c)
+        @views r, e, k = tmp[1:13], tmp[14:19], tmp[20:25]
+        map!(r, 0:12) do k; poissonLogNormal_moment(k, m, c, S2) end
+        map!(e, 1:6) do k
+            mapreduce(a -> binomial(2k, a) * (-m)^(2k-a) * r[a+1], +, 0:2k) / mcm^k
+        end
+        # kappa1 to kappa6 summands of each cell j at gene i
+        k[1] = e[1] # e[1] == 1
+        k[2] = -e[1]^2 + e[2]
+        k[3] = 2e[1]^3 - 3e[2]e[1] + e[3]
+        k[4] = -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4]
+        k[5] = 24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] +
+                 30e[2]^2e[1] - 5e[4]e[1] + e[5]
+        k[6] = -120e[1]^6 + 360e[2]e[1]^4 - 270e[2]^2e[1]^2 +
+                 30e[2]^3 - 120e[3]e[1]^3 + 120e[3]e[2]e[1] - 10e[3]^2 +
+                 30e[4]e[1]^2 - 15e[4]e[2] - 6e[5]e[1] + e[6]
+        k
+        # The actual cumulants are lower by a factor of (n-1)^k,
+        # but since that would cancel each other out in the CF coefficients,
+        # we are skipping this denominator, hence the name "unaveraged."
+    end
+end
+
+function calculator_Fano_CornishFisher(fun_κϕij)
     @inline function(i)
-        k = _κϕi(i)
-        # The denominators in actual cumulants cancel each other out in the below ratios.
-        # For ratios t, u, and sqrt(k[2]), an (n-1) is left;
-        # for ratios a, b, their (n-1)^k cancel each other out completely.
-        df = _κϕi._PLNrij._mcϕi.n - 1
-        mcϕi = _κϕi._PLNrij._mcϕi.cache[i]
-        t, u, v = k[3]/6k[2], k[5]/20k[2]^2, sqrt(k[2])
-        a, b = k[3]^2/18k[2]^3, k[4]/4k[2]^2
-        f = x -> 1 - mcϕi + ((-1 + 17a/3 - 2b  )t + u/2) / df +
-                        x *  ( 1 +  5a/2 -  b/2)v        / df +
-                      x^2 * (( 1 - 53a/3 + 5b  )t - u)   / df +
-                      x^3 *  (   -   a   +  b/6)v        / df +
-                      x^4 * ((   +  4a   -  b  )t + u/6) / df
-        #ccdf(Normal(), find_zero(f, 0))
+        n, mcϕi = fun_κϕij.fun_mcϕi.n, fun_κϕij.fun_mcϕi.cache[i]
+        k = @tasks for j in 1:n
+            @set reducer = +
+            @local tmp = zeros(13+6+6)
+            fun_κϕij(i, j, tmp)
+        end
+        sk2 = sqrt(k[2])
+        sd = sk2 / (n - 1)
+        # Skewness, excess kurtosis and so on, over powers of SD
+        γ1 = k[3] / sk2^3
+        γ2 = k[4] / sk2^4
+        γ3 = k[5] / sk2^5
+        γ4 = k[6] / sk2^6
+        # Probabilist's Hermite polynomials
+        He1 = Polynomial([0, 1])
+        He2 = Polynomial([-1, 0, 1])
+        He3 = Polynomial([0, -3, 0, 1])
+        He4 = Polynomial([3, 0, -6, 0, 1])
+        He5 = Polynomial([0, 15, 0, -10, 0, 1])
+        # Cornish-Fisher expansion polynomials
+        h1, h2,  h11  = He2/6, He3/24, -(2He3 + He1)/36
+        h3, h12, h111 = He4/120, -(He4 + He2)/24, (12He4 + 19He2)/324
+        h4, h22, h13  = He5/720, -(3He5 + 6He3 + 2He1)/384, -(2He5 + 3He3)/180
+        h112, h1111 = (14He5 + 37He3 + 8He1)/288, -(252He5 + 832He3 + 227He1)/7776
+        # first term in the weight, x, is equivalent to polynomial He1
+        f = 1 - mcϕi + sd * mapreduce(*, +,
+            [He1, h1, h2,  h11, h3,   h12, h111, h4,  h22,   h13,   h112, h1111],
+              [1, γ1, γ2, γ1^2, γ3, γ1*γ2, γ1^3, γ4, γ2^2, γ1*γ3, γ2*γ1^2, γ1^4])
+        #ccdf(Normal(), roots(f))
     end
 end
