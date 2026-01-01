@@ -16,22 +16,21 @@ function findVariableGenes(mat::AbstractMatrix{T}, names;
                            min_fano = 1.5, FDR = 0.05) where {T<:Number}
     m, n = size(mat)
     calc_mu = calculator_expected_counts(mat)
-    calc_fano = calculator_modifiedcorrected_Fano(calc_mu)
-    predicate = x -> mean_lower < x < mean_upper
-    sub_rows = findall(predicate, calc_mu.gene_totals ./ n)
-    @info "finding fit for c in " * string(length(sub_rows)) * " genes"
-    @time @info optimize_c_for_Fano!(calc_fano, sub_rows)
+    calc_cv = calculator_coefficient_variation(calc_mu)
+    rowmask = (x -> mean_lower < x < mean_upper).(calc_cv.model.gene_mean)
+    @info "finding fit for c in " * string(sum(rowmask)) * " genes"
+    @time @info find_coefficient_variation!(calc_cv, rowmask)
     @info "using this c to calculate modified corrected Fano factors for all"
-    mcFano = calc_fano.cache
-    nulldistribution_fano = calculator_nulldistribution_Fano(calc_fano)
+    mcFano = calc_cv.model.mcFano
+    nulldistribution_fano = calculator_nulldistribution_Fano(calc_cv)
     quan = map(1:m) do i
         r = filter(x -> x.im == 0, roots(nulldistribution_fano(i) - mcFano[i]))
         length(r) == 0 ? 0 : minimum(abs.(r))
     end
     pval = map(x -> ccdf(Normal(), x), quan)
     padj = adjust(pval, BenjaminiHochberg())
-    hvg = @. calc_fano.cache >= min_fano && padj <= FDR
-    cv = [calc_fano.c[1] for _ in mcFano]
+    hvg = @. mcFano >= min_fano && padj <= FDR
+    cv = [calc_cv.c[1] for _ in mcFano]
     DataFrame("names" => names, "cv" => cv, "mcFano" => mcFano, "quantile" => quan,
               "p_val" => pval, "padj_BH" => padj, "highly_variable" => hvg)
 end

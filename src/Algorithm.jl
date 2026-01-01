@@ -4,8 +4,9 @@ function calculator_expected_counts(mat::AbstractMatrix{T}) where {T<:Number}
     @assert all(gene_totals .> 0) "Some genes have zero counts. Please remove them."
     @assert all(cell_totals .> 0) "Some cells have zero counts. Please remove them."
     total = sum(cell_totals)
-    @inline function (i, j)
+    @inline function (i, j, alt_gene_total::Integer = 0)
         @boundscheck checkbounds(mat, i, j)
+        alt_gene_total != 0 && return alt_gene_total * cell_totals[j] / total
         gene_totals[i] * cell_totals[j] / total
     end
 end
@@ -13,48 +14,47 @@ end
 @inline noise_factor(mu, c) = 1 + c^2 * mu
 @inline pearson_residual(x, mu, c) = (x - mu) / sqrt(mu * noise_factor(mu, c))
 
-function calculator_modifiedcorrected_Fano(fun_μij)
-    mat = fun_μij.mat
+function calculator_coefficient_variation(calc_mu)
+    mat = calc_mu.mat
     m, n = size(mat)
-    T = typeof(fun_μij.total)
+    T = eltype(mat)
     c = zeros(T, 1)
-    cache = zeros(T, m)
-    function (c_search = c[1], rows = nothing)
-        rows = isnothing(rows) ? (1:m) : rows
-        if c[1] != c_search # simply overwrite the cached value
+    model = DataFrame("gene_mean" => calc_mu.gene_totals ./ n,
+                      "mcFano" => zeros(T, m), "mask" => trues(m))
+    function (c_search = nothing, rowmask::Union{BitArray, Nothing} = nothing)
+        if !isnothing(c_search)
+            @assert 0 <= c_search
             c[1] = c_search
-            @views tmap!(cache[rows], rows) do i
-                mapreduce(+, 1:n) do j
-                    pearson_residual(mat[i, j], fun_μij(i, j), c_search)^2
+            if isnothing(rowmask)
+                rowmask = trues(m)
+            else
+                model.mask .= rowmask
+            end
+            @tasks for i in findall(identity, rowmask)
+                model.mcFano[i] = mapreduce(+, 1:n) do j
+                    pearson_residual(mat[i, j], calc_mu(i, j), c_search)^2
                 end / (n - 1)
             end
         end
-        @views cache[rows]
+        lm(@formula(log10(mcFano) ~ log10(gene_mean)), model[model.mask, :])
     end
 end
 
-function optimize_c_for_Fano!(fun_mcϕi, sub_rows)
-    X = fun_mcϕi.fun_μij.gene_totals[sub_rows] ./ fun_mcϕi.m
-    function objective(c)
-        Y = fun_mcϕi(c, sub_rows)
-        model = lm(@formula(y ~ x), (; x = log10.(X), y = log10.(Y)))
-        slope = coef(model)[2]
-        abs(slope)
-    end
-    result = optimize(objective, 0, 1)
+function find_coefficient_variation!(calc_cv, rowmask)
+    result = optimize(c -> abs(coef(calc_cv(c, rowmask))[2]), 0, 1)
     c = result.minimizer
-    fun_mcϕi(c) # not returned; instead, fanos_calc.cache is always accessible
+    calc_cv(c)
     (; c = c, best_slope = result.minimum)
 end
 
-function calculator_modifiedcorrected_PCC(fun_mcϕi)
+function calculator_modifiedcorrected_PCC(calc_cv)
     # inner product of rows i1 and i2 of residuals divided by respective fanos
     function (i1, i2)
-        f = fun_mcϕi
-        mat, n, c, cache, mu = f.mat, f.n, f.c[1], f.cache, f.fun_μij
+        f = calc_cv
+        mat, n, c, mcFano, calc_mu = f.mat, f.n, f.c[1], f.model.mcFano, f.calc_mu
         tmapreduce(+, 1:n) do j
             mapreduce(*, [i1, i2]) do i
-                pearson_residual(mat[i, j], mu(i, j), c) / sqrt(cache[i])
+                pearson_residual(mat[i, j], calc_mu(i, j), c) / sqrt(mcFano[i])
             end
         end / (n - 1)
     end
@@ -62,9 +62,9 @@ end
 
 @inline function stirlings2_table(k_upto)
     table = zeros(Int, k_upto+1, k_upto+1)
-    for k in 0:k_upto; for j in 0:k
+    for k in 0:k_upto, j in 0:k
         table[k+1, j+1] = Combinatorics.stirlings2(k, j)
-    end end
+    end
     table
 end
 
@@ -99,14 +99,14 @@ end
     q
 end
 
-function calculator_nulldistribution_Fano(fun_mcϕi)
+function calculator_nulldistribution_Fano(calc_cv)
     S2 = stirlings2_table(12)
-    @inline function(i)
-        n, c, fn_mu = fun_mcϕi.n, fun_mcϕi.c[1], fun_mcϕi.fun_μij
+    @inline function (i)
+        n, c = calc_cv.n, calc_cv.c[1]
         k = @tasks for j in 1:n
             @set reducer = +
             @local tmp = zeros(13+6+6)
-            unaveraged_nullFano_cumulants(fn_mu(i, j), c, tmp, S2)
+            unaveraged_nullFano_cumulants(calc_cv.calc_mu(i, j), c, tmp, S2)
         end
         μ = k[1] / (n - 1) # == n/(n-1)
         sk2 = sqrt(k[2])
@@ -139,4 +139,25 @@ function calculator_nulldistribution_Fano(fun_mcϕi)
               [1, γ1, γ2, γ1^2, γ3, γ1*γ2, γ1^3, γ4, γ2^2, γ1*γ3, γ2*γ1^2, γ1^4])
         # pval = ccdf(Normal(), min_abs_real(roots(f(i) - mcFano[i])))
     end
+end
+
+@inline function simulation_gene_levels(gene_totals, n)
+    a = max(2, minimum(gene_totals))
+    e = n / 50
+    h = maximum(gene_totals)
+    @. Int(round([ # ordered from least to most, 9 points
+        a, a^(3/4) * e^(1/4), sqrt(a * e), a^(1/4) * e^(3/4),
+        e, e^(3/4) * h^(1/4), sqrt(e * h), e^(1/4) * h^(3/4), h
+    ]))
+end
+
+@inline function simulation_trials(sim_total, n)
+    a = log10(sim_total)
+    Int(round(4e7 / n / (a^(1/5) + 0.5a^3)))
+end
+
+@inline function poissonLogNormal_sample(m, c)
+    chi = 1 + c^2
+    rate = rand(LogNormal(log(m / sqrt(chi)), sqrt(log(chi))))
+    rand(Poisson(rate))
 end
