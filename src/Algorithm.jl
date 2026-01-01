@@ -60,7 +60,7 @@ function calculator_modifiedcorrected_PCC(fun_mcϕi)
     end
 end
 
-@inline function stirlings2(k_upto)
+@inline function stirlings2_table(k_upto)
     table = zeros(Int, k_upto+1, k_upto+1)
     for k in 0:k_upto; for j in 0:k
         table[k+1, j+1] = Combinatorics.stirlings2(k, j)
@@ -73,33 +73,40 @@ end
     mapreduce(j -> stirlings2[k+1, j+1] * chi^(j*(j-1)/2) * m^j, +, 0:k)
 end
 
-@inline function unaveraged_Fano_cumulants(m, c, tmp, stirlings2)
+@inline function noncentral_moment_to_cumulant!(e, q)
+    @assert 4 <= length(e) == length(q) <= 6
+    q[1] = e[1]
+    q[2] = -e[1]^2 + e[2]
+    q[3] = 2e[1]^3 - 3e[2]e[1] + e[3]
+    q[4] = -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4]
+    length(e) == 4 && return;
+    q[5] = 24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] +
+             30e[2]^2e[1] - 5e[4]e[1] + e[5]
+    length(e) == 5 && return;
+    q[6] = -120e[1]^6 + 360e[2]e[1]^4 - 270e[2]^2e[1]^2 +
+             30e[2]^3 - 120e[3]e[1]^3 + 120e[3]e[2]e[1] - 10e[3]^2 +
+             30e[4]e[1]^2 - 15e[4]e[2] - 6e[5]e[1] + e[6]
+end
+
+@inline function unaveraged_nullFano_cumulants(m, c, tmp, stirlings2)
     div = m * noise_factor(m, c) # * (n - 1) for actual moments/cumulants
     @views r, e, q = tmp[1:13], tmp[14:19], tmp[20:25]
     map!(r, 0:12) do k; poissonLogNormal_moment(k, m, c, stirlings2) end
     map!(e, 1:6) do k
         mapreduce(i -> binomial(2k, i) * (-m)^(2k-i) * r[i+1], +, 0:2k) / div^k
     end
-    q[1] = e[1]
-    q[2] = -e[1]^2 + e[2]
-    q[3] = 2e[1]^3 - 3e[2]e[1] + e[3]
-    q[4] = -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4]
-    q[5] = 24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] +
-             30e[2]^2e[1] - 5e[4]e[1] + e[5]
-    q[6] = -120e[1]^6 + 360e[2]e[1]^4 - 270e[2]^2e[1]^2 +
-             30e[2]^3 - 120e[3]e[1]^3 + 120e[3]e[2]e[1] - 10e[3]^2 +
-             30e[4]e[1]^2 - 15e[4]e[2] - 6e[5]e[1] + e[6]
+    noncentral_moment_to_cumulant!(e, q)
     q
 end
 
 function calculator_nulldistribution_Fano(fun_mcϕi)
-    S2 = stirlings2(12)
+    S2 = stirlings2_table(12)
     @inline function(i)
         n, c, fn_mu = fun_mcϕi.n, fun_mcϕi.c[1], fun_mcϕi.fun_μij
         k = @tasks for j in 1:n
             @set reducer = +
             @local tmp = zeros(13+6+6)
-            unaveraged_Fano_cumulants(fn_mu(i, j), c, tmp, S2)
+            unaveraged_nullFano_cumulants(fn_mu(i, j), c, tmp, S2)
         end
         μ = k[1] / (n - 1) # == n/(n-1)
         sk2 = sqrt(k[2])

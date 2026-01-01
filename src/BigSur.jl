@@ -17,7 +17,7 @@ function findVariableGenes(mat::AbstractMatrix{T}, names;
     m, n = size(mat)
     calc_mu = calculator_expected_counts(mat)
     calc_fano = calculator_modifiedcorrected_Fano(calc_mu)
-    predicate = x -> x > mean_lower && x < mean_upper
+    predicate = x -> mean_lower < x < mean_upper
     sub_rows = findall(predicate, calc_mu.gene_totals ./ n)
     @info "finding fit for c in " * string(length(sub_rows)) * " genes"
     @time @info optimize_c_for_Fano!(calc_fano, sub_rows)
