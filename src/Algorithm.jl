@@ -99,6 +99,30 @@ end
     q
 end
 
+@inline function quantile_Cornish_Fisher(μ, σ, γ1, γ2, γ3 = nothing, γ4 = nothing)
+    # Probabilist's Hermite polynomials
+    He1 = Polynomial([0, 1])
+    He2 = Polynomial([-1, 0, 1])
+    He3 = Polynomial([0, -3, 0, 1])
+    He4 = Polynomial([3, 0, -6, 0, 1])
+    He5 = Polynomial([0, 15, 0, -10, 0, 1])
+    # Cornish-Fisher expansion polynomials
+    h1, h2,  h11  = He2/6, He3/24, -(2He3 + He1)/36
+    h3, h12, h111 = He4/120, -(He4 + He2)/24, (12He4 + 19He2)/324
+    h4, h22, h13  = He5/720, -(3He5 + 6He3 + 2He1)/384, -(2He5 + 3He3)/180
+    h112, h1111 = (14He5 + 37He3 + 8He1)/288, -(252He5 + 832He3 + 227He1)/7776
+    # Quantile function: we want to know what quantile an observed value is with
+    # respect to the null distribution that has μ, σ, and higher order moments.
+    # We are going to find solutions to f(x::quantile(Normal(0, 1), p)) = value,
+    # which maps a standard Normal quantile x to the custom distribution.
+    # The weight on SD is a polynomial of x, whose first term x == He1.
+    w = mapreduce(*, +, [He1, h1, h2, h11], [1, γ1, γ2, γ1^2])
+    w += isnothing(γ3) ? 0 : mapreduce(*, +, [h3, h12, h111], [γ3, γ1*γ2, γ1^3])
+    w += isnothing(γ4) ? 0 : mapreduce(*, +, [h4, h22,  h13,   h112,    h1111],
+                                             [γ4, γ2^2, γ1*γ3, γ1^2*γ2, γ1^4])
+    f = μ + σ * w
+end
+
 function calculator_nulldistribution_Fano(calc_cv)
     S2 = stirlings2_table(12)
     @inline function (i)
@@ -118,25 +142,7 @@ function calculator_nulldistribution_Fano(calc_cv)
         γ2 = k[4] / sk2^4
         γ3 = k[5] / sk2^5
         γ4 = k[6] / sk2^6
-        # Probabilist's Hermite polynomials
-        He1 = Polynomial([0, 1])
-        He2 = Polynomial([-1, 0, 1])
-        He3 = Polynomial([0, -3, 0, 1])
-        He4 = Polynomial([3, 0, -6, 0, 1])
-        He5 = Polynomial([0, 15, 0, -10, 0, 1])
-        # Cornish-Fisher expansion polynomials
-        h1, h2,  h11  = He2/6, He3/24, -(2He3 + He1)/36
-        h3, h12, h111 = He4/120, -(He4 + He2)/24, (12He4 + 19He2)/324
-        h4, h22, h13  = He5/720, -(3He5 + 6He3 + 2He1)/384, -(2He5 + 3He3)/180
-        h112, h1111 = (14He5 + 37He3 + 8He1)/288, -(252He5 + 832He3 + 227He1)/7776
-        # Quantile function: we want to know what quantile an observed mcFano is,
-        # on the null distribution which has n/(n-1) mean and this particular SD,
-        # therefore we will find roots to this function minus the observed mcFano.
-        # This function maps a standard Normal quantile x to the new distribution.
-        # The weight on SD is a polynomial of x, whose first term x == He1.
-        f = μ + sd * mapreduce(*, +,
-            [He1, h1, h2,  h11, h3,   h12, h111, h4,  h22,   h13,   h112, h1111],
-              [1, γ1, γ2, γ1^2, γ3, γ1*γ2, γ1^3, γ4, γ2^2, γ1*γ3, γ2*γ1^2, γ1^4])
+        quantile_Cornish_Fisher(μ, sd, γ1, γ2, γ3, γ4)
         # pval = ccdf(Normal(), min_abs_real(roots(f(i) - mcFano[i])))
     end
 end
