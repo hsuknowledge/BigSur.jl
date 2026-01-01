@@ -8,6 +8,7 @@ using Polynomials: Polynomial, roots
 using Distributions: ccdf, Normal
 using MultipleTesting: adjust, BenjaminiHochberg
 
+include("StatsCore.jl")
 include("Algorithm.jl")
 include("Utils.jl")
 

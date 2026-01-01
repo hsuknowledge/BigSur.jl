@@ -11,25 +11,16 @@ function calculator_expected_counts(mat::AbstractMatrix{T}) where {T<:Number}
     end
 end
 
-@inline noise_factor(mu, c) = 1 + c^2 * mu
-@inline pearson_residual(x, mu, c) = (x - mu) / sqrt(mu * noise_factor(mu, c))
-
 function calculator_coefficient_variation(calc_mu)
     mat = calc_mu.mat
     m, n = size(mat)
-    T = eltype(mat)
-    c = zeros(T, 1)
-    model = DataFrame("gene_mean" => calc_mu.gene_totals ./ n,
-                      "mcFano" => zeros(T, m), "mask" => trues(m))
+    gmean = calc_mu.gene_totals ./ n
+    model = DataFrame(gene_mean = gmean, mcFano = zero(gmean), mask = trues(m))
+    c = zeros(eltype(gmean), 1)
     function (c_search = nothing, rowmask::Union{BitArray, Nothing} = nothing)
         if !isnothing(c_search)
-            @assert 0 <= c_search
             c[1] = c_search
-            if isnothing(rowmask)
-                rowmask = trues(m)
-            else
-                model.mask .= rowmask
-            end
+            if isnothing(rowmask) rowmask = trues(m) else model.mask .= rowmask end
             @tasks for i in findall(identity, rowmask)
                 model.mcFano[i] = mapreduce(+, 1:n) do j
                     pearson_residual(mat[i, j], calc_mu(i, j), c_search)^2
@@ -47,90 +38,17 @@ function find_coefficient_variation!(calc_cv, rowmask)
     (; c = c, best_slope = result.minimum)
 end
 
-function calculator_modifiedcorrected_PCC(calc_cv)
-    # inner product of rows i1 and i2 of residuals divided by respective fanos
-    function (i1, i2)
-        f = calc_cv
-        mat, n, c, mcFano, calc_mu = f.mat, f.n, f.c[1], f.model.mcFano, f.calc_mu
-        tmapreduce(+, 1:n) do j
-            mapreduce(*, [i1, i2]) do i
-                pearson_residual(mat[i, j], calc_mu(i, j), c) / sqrt(mcFano[i])
-            end
-        end / (n - 1)
-    end
-end
-
-@inline function stirlings2_table(k_upto)
-    table = zeros(Int, k_upto+1, k_upto+1)
-    for k in 0:k_upto, j in 0:k
-        table[k+1, j+1] = Combinatorics.stirlings2(k, j)
-    end
-    table
-end
-
-@inline function poissonLogNormal_moment(k, m, c, stirlings2)
-    chi = 1 + c^2
-    mapreduce(j -> stirlings2[k+1, j+1] * chi^(j*(j-1)/2) * m^j, +, 0:k)
-end
-
-@inline function noncentral_moment_to_cumulant!(e, q)
-    @assert 4 <= length(e) == length(q) <= 6
-    q[1] = e[1]
-    q[2] = -e[1]^2 + e[2]
-    q[3] = 2e[1]^3 - 3e[2]e[1] + e[3]
-    q[4] = -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4]
-    length(e) == 4 && return;
-    q[5] = 24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] +
-             30e[2]^2e[1] - 5e[4]e[1] + e[5]
-    length(e) == 5 && return;
-    q[6] = -120e[1]^6 + 360e[2]e[1]^4 - 270e[2]^2e[1]^2 +
-             30e[2]^3 - 120e[3]e[1]^3 + 120e[3]e[2]e[1] - 10e[3]^2 +
-             30e[4]e[1]^2 - 15e[4]e[2] - 6e[5]e[1] + e[6]
-end
-
-@inline function unaveraged_nullFano_cumulants(m, c, tmp, stirlings2)
-    div = m * noise_factor(m, c) # * (n - 1) for actual moments/cumulants
-    @views r, e, q = tmp[1:13], tmp[14:19], tmp[20:25]
-    map!(r, 0:12) do k; poissonLogNormal_moment(k, m, c, stirlings2) end
-    map!(e, 1:6) do k
-        mapreduce(i -> binomial(2k, i) * (-m)^(2k-i) * r[i+1], +, 0:2k) / div^k
-    end
-    noncentral_moment_to_cumulant!(e, q)
-    q
-end
-
-@inline function quantile_Cornish_Fisher(μ, σ, γ1, γ2, γ3 = nothing, γ4 = nothing)
-    # Probabilist's Hermite polynomials
-    He1 = Polynomial([0, 1])
-    He2 = Polynomial([-1, 0, 1])
-    He3 = Polynomial([0, -3, 0, 1])
-    He4 = Polynomial([3, 0, -6, 0, 1])
-    He5 = Polynomial([0, 15, 0, -10, 0, 1])
-    # Cornish-Fisher expansion polynomials
-    h1, h2,  h11  = He2/6, He3/24, -(2He3 + He1)/36
-    h3, h12, h111 = He4/120, -(He4 + He2)/24, (12He4 + 19He2)/324
-    h4, h22, h13  = He5/720, -(3He5 + 6He3 + 2He1)/384, -(2He5 + 3He3)/180
-    h112, h1111 = (14He5 + 37He3 + 8He1)/288, -(252He5 + 832He3 + 227He1)/7776
-    # Quantile function: we want to know what quantile an observed value is with
-    # respect to the null distribution that has μ, σ, and higher order moments.
-    # We are going to find solutions to f(x::quantile(Normal(0, 1), p)) = value,
-    # which maps a standard Normal quantile x to the custom distribution.
-    # The weight on SD is a polynomial of x, whose first term x == He1.
-    w = mapreduce(*, +, [He1, h1, h2, h11], [1, γ1, γ2, γ1^2])
-    w += isnothing(γ3) ? 0 : mapreduce(*, +, [h3, h12, h111], [γ3, γ1*γ2, γ1^3])
-    w += isnothing(γ4) ? 0 : mapreduce(*, +, [h4, h22,  h13,   h112,    h1111],
-                                             [γ4, γ2^2, γ1*γ3, γ1^2*γ2, γ1^4])
-    f = μ + σ * w
-end
-
 function calculator_nulldistribution_Fano(calc_cv)
     S2 = stirlings2_table(12)
-    @inline function (i)
+    function (i)
         n, c = calc_cv.n, calc_cv.c[1]
         k = @tasks for j in 1:n
             @set reducer = +
             @local tmp = zeros(13+6+6)
-            unaveraged_nullFano_cumulants(calc_cv.calc_mu(i, j), c, tmp, S2)
+            @views r, e, q = tmp[1:13], tmp[14:19], tmp[20:25]
+            map!(k -> poisson_lognormal_moment(k, m, c, S2), r, 0:12)
+            map!(k -> pearson_residual_moment(2k, m, c, r), e, 1:6)
+            noncentral_moment_to_cumulant!(e, q)
         end
         μ = k[1] / (n - 1) # == n/(n-1)
         sk2 = sqrt(k[2])
@@ -144,6 +62,19 @@ function calculator_nulldistribution_Fano(calc_cv)
         γ4 = k[6] / sk2^6
         quantile_Cornish_Fisher(μ, sd, γ1, γ2, γ3, γ4)
         # pval = ccdf(Normal(), min_abs_real(roots(f(i) - mcFano[i])))
+    end
+end
+
+function calculator_modifiedcorrected_PCC(calc_cv)
+    # inner product of rows i1 and i2 of residuals divided by respective fanos
+    function (i1, i2)
+        f = calc_cv
+        mat, n, c, mcFano, calc_mu = f.mat, f.n, f.c[1], f.model.mcFano, f.calc_mu
+        tmapreduce(+, 1:n) do j
+            mapreduce(*, [i1, i2]) do i
+                pearson_residual(mat[i, j], calc_mu(i, j), c) / sqrt(mcFano[i])
+            end
+        end / (n - 1)
     end
 end
 
