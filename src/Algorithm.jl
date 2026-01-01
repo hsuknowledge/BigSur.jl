@@ -23,7 +23,7 @@ function calculator_coefficient_variation(calc_mu)
             if isnothing(rowmask) rowmask = trues(m) else model.mask .= rowmask end
             @tasks for i in findall(identity, rowmask)
                 model.mcFano[i] = mapreduce(+, 1:n) do j
-                    pearson_residual(mat[i, j], calc_mu(i, j), c_search)^2
+                    pearson_residual2(mat[i, j], calc_mu(i, j), c_search)^2
                 end / (n - 1)
             end
         end
@@ -46,9 +46,11 @@ function calculator_nulldistribution_Fano(calc_cv)
             @set reducer = +
             @local tmp = zeros(13+6+6)
             @views r, e, q = tmp[1:13], tmp[14:19], tmp[20:25]
+            m = calc_cv.calc_mu(i, j)
             map!(k -> poisson_lognormal_moment(k, m, c, S2), r, 0:12)
-            map!(k -> pearson_residual_moment(2k, m, c, r), e, 1:6)
+            map!(k -> pearson_residual2_moment(k, m, c, r), e, 1:6)
             noncentral_moment_to_cumulant!(e, q)
+            q
         end
         μ = k[1] / (n - 1) # == n/(n-1)
         sk2 = sqrt(k[2])
