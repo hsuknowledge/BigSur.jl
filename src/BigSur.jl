@@ -24,16 +24,15 @@ function findVariableGenes(mat::AbstractMatrix{T}, names;
     @info "using this c to calculate modified corrected Fano factors for all"
     mcFano = calc_fano.cache
     nulldistribution_fano = calculator_nulldistribution_Fano(calc_fano)
-    root = map(1:m) do i
+    quan = map(1:m) do i
         r = filter(x -> x.im == 0, roots(nulldistribution_fano(i) - mcFano[i]))
         length(r) == 0 ? 0 : minimum(abs.(r))
     end
-    pval = map(x -> ccdf(Normal(), x), root)
+    pval = map(x -> ccdf(Normal(), x), quan)
     padj = adjust(pval, BenjaminiHochberg())
     hvg = @. calc_fano.cache >= min_fano && padj <= FDR
-    cs = zero(pval)
-    fill!(cs, calc_fano.c[1])
-    DataFrame("names" => names, "mcFano" => mcFano, "c" => cs, "root" => root,
+    cv = [calc_fano.c[1] for _ in mcFano]
+    DataFrame("names" => names, "cv" => cv, "mcFano" => mcFano, "quantile" => quan,
               "p_val" => pval, "padj_BH" => padj, "highly_variable" => hvg)
 end
 
