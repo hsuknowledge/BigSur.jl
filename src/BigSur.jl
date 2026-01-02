@@ -1,5 +1,6 @@
 #module BigSur
 
+using DataFrames: DataFrame
 using OhMyThreads: tmap!, @tasks
 using GLM: lm, @formula, coef
 using Optim: optimize
@@ -10,7 +11,6 @@ using MultipleTesting: adjust, BenjaminiHochberg
 
 include("StatsCore.jl")
 include("Algorithm.jl")
-include("Utils.jl")
 
 function findVariableGenes(mat::AbstractMatrix{T}, names;
                            mean_lower = 0.1, mean_upper = 100,
