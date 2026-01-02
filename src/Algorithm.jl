@@ -4,27 +4,30 @@ function calculator_expected_counts(mat::AbstractMatrix{T}) where {T<:Number}
     @assert all(gene_totals .> 0) "Some genes have zero counts. Please remove them."
     @assert all(cell_totals .> 0) "Some cells have zero counts. Please remove them."
     total = sum(cell_totals)
+    emat = LazyArray(@~ gene_totals * cell_totals' ./ total)
     @inline function (i, j, alt_gene_total::Integer = 0)
         @boundscheck checkbounds(mat, i, j)
-        alt_gene_total != 0 && return alt_gene_total * cell_totals[j] / total
-        gene_totals[i] * cell_totals[j] / total
+        alt_gene_total != 0 && gene_totals && return alt_gene_total * cell_totals[j] / total
+        emat[i, j]
     end
 end
 
 function calculator_coefficient_variation(calc_mu)
-    mat = calc_mu.mat
-    m, n = size(mat)
+    x_row = eachrow(calc_mu.mat)
+    mu_row = eachrow(calc_mu.emat)
+    m, n = size(calc_mu.mat)
     gmean = calc_mu.gene_totals ./ n
     model = DataFrame(gene_mean = gmean, mcFano = zero(gmean), mask = trues(m))
     c = zeros(eltype(gmean), 1)
-    function (c_search = nothing, rowmask::Union{BitArray, Nothing} = nothing)
+    function (c_search = nothing, rowmask::BitArray = trues(m), setmask = false)
+        if setmask; model.mask .= rowmask end
         if !isnothing(c_search)
             c[1] = c_search
-            if isnothing(rowmask) rowmask = trues(m) else model.mask .= rowmask end
+            f = @$ pearson_residual2(_, _, c_search)
             @tasks for i in findall(identity, rowmask)
-                model.mcFano[i] = mapreduce(+, 1:n) do j
-                    pearson_residual2(mat[i, j], calc_mu(i, j), c_search)^2
-                end / (n - 1)
+                @local tmp = zeros(n)
+                map!(f, tmp, x_row[i], mu_row[i])
+                model.mcFano[i] = sum(tmp) / (n - 1)
             end
         end
         lm(@formula(log10(mcFano) ~ log10(gene_mean)), model[model.mask, :])
@@ -32,7 +35,7 @@ function calculator_coefficient_variation(calc_mu)
 end
 
 function find_coefficient_variation!(calc_cv, rowmask)
-    result = optimize(c -> abs(coef(calc_cv(c, rowmask))[2]), 0, 1)
+    result = optimize(c -> abs(coef(calc_cv(c, rowmask, true))[2]), 0, 100)
     c = result.minimizer
     calc_cv(c)
     (; c = c, best_slope = result.minimum)
@@ -42,14 +45,16 @@ function calculator_nulldistribution_Fano(calc_cv)
     S2 = stirlings2_table(12)
     B = binomial_table(12)
     function (i)
-        n, c = calc_cv.n, calc_cv.c[1]
+        n, c, mu_i = calc_cv.n, calc_cv.c[1], calc_cv.mu_row[i]
+        f1 = @$ poisson_lognormal_moment(_, _, c, S2)
+        f2 = @$ pearson_residual2_moment(_, _, c, _, B)
         k = @tasks for j in 1:n
             @set reducer = +
             @local tmp = zeros(13+6+6)
             @views r, e, q = tmp[1:13], tmp[14:19], tmp[20:25]
-            m = calc_cv.calc_mu(i, j)
-            map!(k -> poisson_lognormal_moment(k, m, c, S2), r, 0:12)
-            map!(k -> pearson_residual2_moment(k, m, c, r, B), e, 1:6)
+            m = mu_i[j]
+            r .= f1.(0:12, m)
+            e .= f2.(1:6, m, Ref(r))
             noncentral_moment_to_cumulant!(e, q)
             q
         end

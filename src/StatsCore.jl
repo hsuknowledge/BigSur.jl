@@ -3,12 +3,22 @@
 @inline pearson_residual2(x, mu, c) = (x - mu)^2 / var_pearson(mu, c)
 stirlings2_table(n) = [Combinatorics.stirlings2(k, j) for k in 0:n, j in 0:n]
 binomial_table(n) = [binomial(k, i) for k in 0:n, i in 0:n]
-@inline poisson_lognormal_moment(k, m, c, S2) =
-    mapreduce(j -> S2[k+1, j+1] * (1 + c^2)^(j * (j-1) / 2) * m^j, +, 0:k)
+@inline function poisson_lognormal_moment(k, m, c, S2)
+    acc = 0
+    for j in 0:k
+        acc += S2[k+1, j+1] * (1 + c^2)^(j * (j-1) / 2) * m^j
+    end
+    acc
+end
 @inline pearson_residual_moment(k, m, c, r, B) = mapreduce(+, 0:k) do i
     B[k+1, i+1] * (-m)^(k - i) * r[i+1]; end / sqrt(var_pearson(m, c))^k
-@inline pearson_residual2_moment(k, m, c, r, B) = mapreduce(+, 0:2k) do i
-    B[2k+1, i+1] * (-m)^(2k - i) * r[i+1]; end / var_pearson(m, c)^k
+@inline function pearson_residual2_moment(k, m, c, r, B)
+    acc = 0
+    for i in 0:2k
+        acc += B[2k+1, i+1] * (-m)^(2k - i) * r[i+1]
+    end
+    acc / var_pearson(m, c)^k
+end
 
 @inline function noncentral_moment_to_cumulant!(e, q)
     @assert 4 <= length(e) == length(q) <= 6

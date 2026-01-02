@@ -4,6 +4,8 @@ using DataFrames: DataFrame
 using OhMyThreads: tmap!, @tasks
 using GLM: lm, @formula, coef
 using Optim: optimize
+using LazyArrays: LazyArray, @~
+using PartialFunctions: @$
 import Combinatorics # stirlings2
 using Polynomials: Polynomial, roots
 using Distributions: ccdf, Normal
@@ -25,7 +27,8 @@ function findVariableGenes(mat::AbstractMatrix{T}, names;
     mcFano = calc_cv.model.mcFano
     nulldistribution_fano = calculator_nulldistribution_Fano(calc_cv)
     quan = map(1:m) do i
-        r = filter(x -> x.im == 0, roots(nulldistribution_fano(i) - mcFano[i]))
+        r = roots(nulldistribution_fano(i) - mcFano[i])
+        if eltype(r) isa Complex; r = findall(x -> x.im == 0, r) end
         length(r) == 0 ? 0 : minimum(abs.(r))
     end
     pval = map(x -> ccdf(Normal(), x), quan)
