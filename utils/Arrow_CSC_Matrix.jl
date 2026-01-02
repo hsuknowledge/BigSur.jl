@@ -2,6 +2,19 @@ import Arrow
 using DataFrames: DataFrame
 using SparseArrays: SparseMatrixCSC
 
+"""
+Import SparseMatrixCSC-formatted data from DataFrame.
+
+To read from an Arrow file, use `Arrow.Table` and pipe it to `DataFrame`.
+
+Example
+=======
+
+```
+umi = Arrow.Table("demo.arrow") |> DataFrame
+mat = import_CSC_Matrix(umi)
+```
+"""
 function import_CSC_Matrix(df::DataFrame, row::Integer = 1)
     @assert names(df) == ["rowname", "colname", "rowidx", "colptr", "value"]
     m = length(df.rowname[row])
