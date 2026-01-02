@@ -40,6 +40,7 @@ end
 
 function calculator_nulldistribution_Fano(calc_cv)
     S2 = stirlings2_table(12)
+    B = binomial_table(12)
     function (i)
         n, c = calc_cv.n, calc_cv.c[1]
         k = @tasks for j in 1:n
@@ -48,7 +49,7 @@ function calculator_nulldistribution_Fano(calc_cv)
             @views r, e, q = tmp[1:13], tmp[14:19], tmp[20:25]
             m = calc_cv.calc_mu(i, j)
             map!(k -> poisson_lognormal_moment(k, m, c, S2), r, 0:12)
-            map!(k -> pearson_residual2_moment(k, m, c, r), e, 1:6)
+            map!(k -> pearson_residual2_moment(k, m, c, r, B), e, 1:6)
             noncentral_moment_to_cumulant!(e, q)
             q
         end
