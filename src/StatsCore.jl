@@ -1,23 +1,27 @@
-@inline var_pearson(mu, c) = mu * (1 + c^2 * mu)
-@inline pearson_residual(x, mu, c) = (x - mu) / sqrt(var_pearson(mu, c))
-@inline pearson_residual2(x, mu, c) = (x - mu)^2 / var_pearson(mu, c)
-stirlings2_table(n) = [Combinatorics.stirlings2(k, j) for k in 0:n, j in 0:n]
+@inline var_poisson_lognormal(mu, c) = mu * (1 + c^2 * mu)
+@inline pearson_residual(x, mu, c) = (x - mu) / sqrt(var_poisson_lognormal(mu, c))
+@inline pearson_residual2(x, mu, c) = (x - mu)^2 / var_poisson_lognormal(mu, c)
+stirlings2_table(n) = [stirlings2(k, j) for k in 0:n, j in 0:n]
 binomial_table(n) = [binomial(k, i) for k in 0:n, i in 0:n]
 @inline function poisson_lognormal_moment(k, m, c, S2)
     acc = 0
     for j in 0:k
-        acc += S2[k+1, j+1] * (1 + c^2)^(j * (j-1) / 2) * m^j
+        acc += S2[k+1, j+1] * pow(1 + c^2, (j-1)j / 2) * pow(m, j)
     end
     acc
 end
-@inline pearson_residual_moment(k, m, c, r, B) = mapreduce(+, 0:k) do i
-    B[k+1, i+1] * (-m)^(k - i) * r[i+1]; end / sqrt(var_pearson(m, c))^k
+@inline function pearson_residual_moment(k, m, c, r, B)
+    acc = 0
+    for i in 0:k
+        acc += (-1)^(k-i) * B[k+1, i+1] * pow(m, k - i) * r[i+1]
+    end / pow(var_poisson_lognormal(m, c), k / 2)
+end
 @inline function pearson_residual2_moment(k, m, c, r, B)
     acc = 0
     for i in 0:2k
-        acc += B[2k+1, i+1] * (-m)^(2k - i) * r[i+1]
+        acc += (-1)^i * B[2k+1, i+1] * pow(m, 2k - i) * r[i+1]
     end
-    acc / var_pearson(m, c)^k
+    acc / pow(var_poisson_lognormal(m, c), k)
 end
 
 @inline function noncentral_moment_to_cumulant!(e, q)
@@ -51,9 +55,9 @@ end
     # We are going to find solutions to f(x::quantile(Normal(0, 1), p)) = value,
     # which maps a standard Normal quantile x to the custom distribution.
     # The weight on SD is a polynomial of x, whose first term x == He1.
-    w = mapreduce(*, +, [He1, h1, h2, h11], [1, γ1, γ2, γ1^2])
-    w += isnothing(γ3) ? 0 : mapreduce(*, +, [h3, h12, h111], [γ3, γ1*γ2, γ1^3])
-    w += isnothing(γ4) ? 0 : mapreduce(*, +, [h4, h22,  h13,   h112,    h1111],
-                                             [γ4, γ2^2, γ1*γ3, γ1^2*γ2, γ1^4])
+    w = He1 + mapreduce(*, +, [h1, h2, h11], [γ1, γ2, γ1^2])
+    if !isnothing(γ3) w += mapreduce(*, +, [h3, h12, h111], [γ3, γ1*γ2, γ1^3]) end
+    if !isnothing(γ4) w += mapreduce(*, +, [h4, h22,  h13,   h112,    h1111],
+                                           [γ4, γ2^2, γ1*γ3, γ1^2*γ2, γ1^4]) end
     f = μ + σ * w
 end
