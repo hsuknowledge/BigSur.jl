@@ -2,9 +2,9 @@ function apply_cv!(model::BigSurModel{T}, cv::U; ## cv can be a ForwardDiff.Dual
                    to_all::Bool = false)::U where {T<:Real, U<:Real}
     df = rowdata(model)
     m, n = size(model)
-    @assert "for_fitting_cv" in names(df) "Run `set_cv_fitting_range!` first."
+    mask = copy(df.fit_cv)
+    @assert sum(mask) > 0 "Run `set_cv_fitting_range!` first."
     xrows, erows = eachrow(measured_values(model)), eachrow(expected_values(model))
-    mask = df.for_fitting_cv
     do_fano = to_all ? trues(m) : mask
     mcFano = typeof(cv) == T ? df.mcFano : zeros(typeof(cv), m)
     @tasks for i in findall(do_fano) ## again, faster and less alloc than mapreduce
@@ -14,6 +14,8 @@ function apply_cv!(model::BigSurModel{T}, cv::U; ## cv can be a ForwardDiff.Dual
         end
         mcFano[i] = acc / (n - 1)
     end
+    fanos = _unwrap_number.(mcFano[mask])
+    mask[mask] .&= abs.(fanos .- median(fanos)) .<= 5 * mad(fanos)
     prob = CurveFitProblem(df.gene_means[mask], mcFano[mask])
     sol = solve(prob, PowerCurveFitAlgorithm())
     slope = coef(sol)[1] # [slope, intercept] (y=a^x*b)
@@ -98,4 +100,10 @@ end
     chi = 1 + c^2
     rate = rand(LogNormal(log(m / sqrt(chi)), sqrt(log(chi))))
     rand(Poisson(rate))
+end
+
+function simulate_invsqrt_moments(model::BigSurModel)
+end
+
+function quantile_null_PCC(model::BigSurModel{T}, i1::Integer, i2::Integer) where {T<:Real}
 end

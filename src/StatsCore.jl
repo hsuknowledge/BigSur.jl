@@ -1,6 +1,6 @@
 @inline var_poisson_lognormal(mu, c) = mu * (1 + abs2(c) * mu)
 @inline pearson_residual(x, mu, c) = (x - mu) / sqrt(var_poisson_lognormal(mu, c))
-@inline pearson_residual2(x, mu, c) = (x - mu)^2 / var_poisson_lognormal(mu, c)
+@inline pearson_residual2(x, mu, c) = abs2(x - mu) / var_poisson_lognormal(mu, c)
 stirlings2_table(n) = [stirlings2(k, j) for k in 0:n, j in 0:n]
 binomial_table(n) = [binomial(k, i) for k in 0:n, i in 0:n]
 chipowers_table(n, c) = [(1 + abs2(c))^div(-j + j^2, 2) for j in 0:n]

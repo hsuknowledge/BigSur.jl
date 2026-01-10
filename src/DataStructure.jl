@@ -15,7 +15,7 @@ function BigSurModel(mat::AbstractMatrix{T}, names::AbstractVector) where {T<:Re
     @assert all(csum .> 0) "Some cells have zero counts. Please remove them."
     rmean = rsum ./ n
     df = DataFrame(names = names, gene_means = rmean,
-                   cv = zeros(T, m), mcFano = zeros(T, m),
+                   fit_cv = falses(m), cv = zeros(T, m), mcFano = zeros(T, m),
                    null_mu = zeros(T, m), null_sd = zeros(T, m),
                    null_skew = zeros(T, m), null_ekur = zeros(T, m),
                    null_valid = falses(m))
@@ -43,8 +43,8 @@ end
 
 function set_cv_fitting_range!(model::BigSurModel, lowbound = 0.1, highbound = 100)
     gmean = rowdata(model).gene_means
-    for_fitting_cv = (x -> lowbound < x < highbound).(gmean)
-    rowdata(model)[!, :for_fitting_cv] = for_fitting_cv
-    num_genes = string(sum(for_fitting_cv))
+    fit_cv = (x -> lowbound < x < highbound).(gmean)
+    rowdata(model)[!, :fit_cv] = fit_cv
+    num_genes = string(sum(fit_cv))
     @info "Setting " * num_genes * " genes for fitting cv using" lowbound highbound
 end
