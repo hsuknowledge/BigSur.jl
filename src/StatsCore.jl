@@ -28,43 +28,23 @@ end
     acc / var_poisson_lognormal(m_powers[2], c)^k
 end
 
-@inline function noncentral_moment_to_cumulant!(e, q)
-    @assert 2 <= length(e) == length(q) <= 6
-    q[1] = e[1]
-    q[2] = -e[1]^2 + e[2]
-    length(e) == 2 && return;
-    q[3] = 2e[1]^3 - 3e[2]e[1] + e[3]
-    length(e) == 3 && return;
-    q[4] = -6e[1]^4 + 12e[2]e[1]^2 - 3e[2]^2 - 4e[1]e[3] + e[4]
-    length(e) == 4 && return;
-    q[5] = 24e[1]^5 - 60e[2]e[1]^3 + 20e[3]e[1]^2 - 10e[2]e[3] +
-             30e[2]^2*e[1] - 5e[4]e[1] + e[5]
-    length(e) == 5 && return;
-    q[6] = -120e[1]^6 + 360e[2]e[1]^4 - 270e[2]^2*e[1]^2 +
-             30e[2]^3 - 120e[3]e[1]^3 + 120e[3]e[2]e[1] - 10e[3]^2 +
-             30e[4]e[1]^2 - 15e[4]e[2] - 6e[5]e[1] + e[6]
-end
-@inline function validity_Cornish_Fisher(γ1, γ2)
-    criterion1 = abs(γ1) - 6 * (sqrt(2) - 1)
-    criterion2 = 27γ2^2 - (216 + 66γ1^2)γ2 + 40γ1^4 + 336γ1^2
-    try criterion1 <= 0 && criterion2 <= 0 catch; true end ## catch interval overlap
-end
-@inline function quantile_Cornish_Fisher(μ, σ, γ1 = nothing, γ2 = nothing,
-                                               γ3 = nothing, γ4 = nothing)
-    # Quantile function: we want to know what quantile an observed value is with
-    # respect to the null distribution that has μ, σ, and higher order moments.
-    # We are going to find solutions to f(x::quantile(Normal(0, 1), p)) = value,
-    # which maps a standard Normal quantile x to the custom distribution.
-    # The weight on SD is a polynomial of x, whose first term x == He1.
-    f(w) = μ + σ * w
-    w = He1
-    isnothing(γ1) && return f(w)
-    w += γ1 * h1
-    isnothing(γ2) && return f(w)
-    w += γ2 * h2 + γ1^2 * h11
-    isnothing(γ3) && return f(w)
-    w += γ3 * h3 + γ1*γ2* h12 + γ1^3 * h111
-    isnothing(γ4) && return f(w)
-    w += γ4 * h4 + γ2^2 * h22 + γ1*γ3* h12 + γ1^2 * γ2 * h112 + γ1^4 * h1111
-    f = μ + σ * w
-end
+@inline noncentral_moment_to_cumulant(e) = [
+      e[1],
+     -e[1]^2 +   e[2],
+     2e[1]^3 -  3e[2]e[1]   +  e[3],
+    -6e[1]^4 + 12e[2]e[1]^2 - 4e[3]e[1] - 3e[2]^2 + e[4]
+]
+# Probabilist's Hermite polynomials
+const He1 = IntervalPolynomial((0, 1, 0, 0))
+const He2 = IntervalPolynomial((-1, 0, 1, 0))
+const He3 = IntervalPolynomial((0, -3, 0, 1))
+# Cornish-Fisher expansion polynomials
+const h1, h2, h11 = He2/6, He3/24, -(2He3 + He1)/36
+"""
+Quantile function that translates a standard Normal quantile z to corresponding
+quantile of the target distribution. According to Maillard's guide (2012), the
+input moments are not the actual moments of the Cornish-Fisher expansion of the
+second order. A correction is needed for us to target the resulting parameters.
+"""
+@inline quantile_Cornish_Fisher(μ, σc, Sc, Kc) =
+    μ + σc / sqrt(m2_Cornish_Fisher(Sc, Kc)) * (He1 + Sc*h1 + Kc*h2 + Sc^2*h11)

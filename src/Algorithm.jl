@@ -38,35 +38,31 @@ find_cv!(model::BigSurModel{<:Interval}) = begin
     hull(rs...; dec = :auto)
 end
 
-function quantile_null_mcFano(model::BigSurModel{T}, gene_idx::Integer;
-                              order::Integer = 4) where {T<:Real}
+function quantile_null_mcFano(model::BigSurModel{T}, gene_idx::Integer) where {T<:Real}
     n, c, emat, df = size(model)[2], cv(model), expected_values(model), rowdata(model)
-    l = order + 2
-    chi_pow = chipowers_table(2l, c)
-    S2 = stirlings2_table(2l)
-    B = binomial_table(2l)
+    chi_pow = chipowers_table(8, c)
+    S2 = stirlings2_table(8)
+    B = binomial_table(8)
     k = @tasks for j in 1:n
         @set reducer = +
         @local begin
-            m_pow, r = Vector{T}(undef, 2l+1), Vector{T}(undef, 2l+1)
-            e, q = Vector{T}(undef, l), Vector{T}(undef, l)
+            m_pow, r = Vector{T}(undef, 9), Vector{T}(undef, 9)
+            e = Vector{T}(undef, 4)
         end
-        m_pow .= emat[gene_idx, j].^(0:2l)
-        map!(k -> poisson_lognormal_moment(k, m_pow, chi_pow, S2), r, 0:2l)
-        map!(k -> pearson_residual2_moment(k, m_pow, c, r, B), e, 1:l)
-        noncentral_moment_to_cumulant!(e, q)
-        q
+        m_pow .= emat[gene_idx, j].^(0:8)
+        map!(k -> poisson_lognormal_moment(k, m_pow, chi_pow, S2), r, 0:8)
+        map!(k -> pearson_residual2_moment(k, m_pow, c, r, B), e, 1:4)
+        noncentral_moment_to_cumulant(e)
     end
     df.null_mu[gene_idx] = μ = k[1] / (n - 1) # == n/(n-1)
     df.null_sd[gene_idx] = sd = sqrt(k[2]) / (n - 1)
-    order == 0 && return quantile_Cornish_Fisher(μ, sd)
-    # In these ratios, the factors 1/(n-1)^k in the Fano cumulants don't matter.
-    γs = @. k[3:l] / sqrt(k[2])^(3:l) # [γ1, γ2, γ3, γ4]
-    if l >= 3; df.null_skew[gene_idx] = γs[1] end
-    if l >= 4; df.null_ekur[gene_idx] = γs[2]
-        df.null_valid[gene_idx] = validity_Cornish_Fisher(γs[1], γs[2])
-    end
-    quantile_Cornish_Fisher(μ, sd, γs...)
+    # Higher moments (γ) in CF expansion ignore 1/(n-1)^k in the actual Fano cumulants
+    df.null_skew[gene_idx] = S = k[3] / k[2]^1.5
+    df.null_ekur[gene_idx] = K = k[4] / k[2]^2
+    (Sc, Kc) = input_correction_Maillard(S, K) # Maillard's CF input correction (2018)
+    if isnothing(Sc) return quantile_Cornish_Fisher(μ, sd, S, K) end
+    df.null_valid[gene_idx] = validity_Cornish_Fisher(Sc, Kc)
+    quantile_Cornish_Fisher(μ, sd, Sc, Kc)
     # pval = ccdf(Normal(), min_abs_real(roots(f(i) - mcFano[i])))
 end
 

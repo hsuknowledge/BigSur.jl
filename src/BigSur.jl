@@ -15,10 +15,11 @@ using LinearAlgebra: norm
 using Distributions: LogNormal, Poisson
 
 include("DataStructure.jl")
+include("IntervalPolynomial.jl") ## for Cornish-Fisher expansion
 include("StatsCore.jl")
+include("MaillardCorrection.jl") ## for Cornish-Fisher expansion
 include("Algorithm.jl")
 
-include("IntervalPolynomial.jl") ## for Cornish-Fisher expansion
 include("IntervalExtra.jl") ## interval-valued normccdf function
 
 function findVariableGenes(mat::AbstractMatrix{<:Real}, names;
