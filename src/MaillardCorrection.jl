@@ -48,7 +48,7 @@ Available at SSRN: https://ssrn.com/abstract=1997178
 Rationale: dZ/dz > 0 ∀z for the bijective property to hold.
 For DZ > 0 ∀z, as a quadratic function of z, its discriminant must be < 0.
 Since this discriminant is a quadratic function of K that opens upward, its
-coefficients in terms of S must satisfy b^2 - 4ac > 0 ie. S^4 - 6S^2 + 1 > 0,
+coefficients in terms of s=S/6 must satisfy b^2-4ac > 0 ie. s^4 - 6s^2 + 1 > 0,
 such that ∃K ∈ (K', K") satisfying a strictly negative discriminant of dZ/dz.
 """
 function validity_Cornish_Fisher(S, K)

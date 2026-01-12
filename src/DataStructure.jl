@@ -4,6 +4,7 @@ struct BigSurModel{T<:Real, A<:AbstractMatrix{T}}
     cell_totals::Vector{T}
     rowdata::DataFrame
     cv_searched::Vector{Pair{T, T}}
+    pearson_residual::Matrix{T}
 end
 
 function BigSurModel(mat::AbstractMatrix{T}, names::AbstractVector) where {T<:Real}
@@ -19,7 +20,8 @@ function BigSurModel(mat::AbstractMatrix{T}, names::AbstractVector) where {T<:Re
                    null_mu = zeros(T, m), null_sd = zeros(T, m),
                    null_skew = zeros(T, m), null_ekur = zeros(T, m),
                    null_valid = falses(m))
-    BigSurModel(mat, rsum, csum, df, Pair{T, T}[])
+    pres = Matrix{T}(undef, n, m) ## note we switch to genes as columns here
+    BigSurModel(mat, rsum, csum, df, Pair{T, T}[], pres)
 end
 
 rowsum(mat::AbstractMatrix) = vec(sum(mat, dims = 2))
@@ -32,6 +34,7 @@ Base.size(model::BigSurModel) = size(model.mat)
 rowdata(model::BigSurModel) = model.rowdata
 cv(model::BigSurModel) = rowdata(model).cv[1]
 cv_searched(model::BigSurModel) = model.cv_searched
+pearson_residual(model::BigSurModel) = model.pearson_residual
 
 function expected_values(model::BigSurModel{T},
                          gene_totals::AbstractVector{T} = rowsum(model)

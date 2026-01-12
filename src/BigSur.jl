@@ -5,6 +5,7 @@ setdisplay(:midpoint; ng_flag = false)
 
 using DataFrames: DataFrame
 using OhMyThreads: @tasks
+using VectorizedReduction: vmapreducethen
 using LazyArrays: LazyArray, @~
 using StatsBase: median, mad
 using CurveFit: CurveFitProblem, PowerCurveFitAlgorithm, solve, coef
@@ -12,7 +13,6 @@ using Roots: find_zero
 using IntervalRootFinding: roots, Bisection, root_region
 using Combinatorics: stirlings2
 using MultipleTesting: adjust, BenjaminiHochberg
-using LinearAlgebra: norm
 using Distributions: LogNormal, Poisson
 
 include("DataStructure.jl")

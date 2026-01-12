@@ -5,9 +5,16 @@ function apply_cv!(model::BigSurModel{T}, cv::U; ## cv can be a ForwardDiff.Dual
     mask = copy(df.fit_cv)
     @assert sum(mask) > 0 "Run `set_cv_fitting_range!` first."
     xrows, erows = eachrow(measured_values(model)), eachrow(expected_values(model))
-    do_fano = to_all ? trues(m) : mask
+    pcols = eachcol(pearson_residual(model))
+    if to_all
+        @tasks for i in 1:m
+            map!(Base.Fix{3}(pearson_residual, cv), pcols[i], xrows[i], erows[i])
+            df.mcFano[i] = vmapreducethen(abs2, +, Base.Fix2(/, n - 1), pcols[i])
+        end
+        return cv
+    end
     mcFano = typeof(cv) == T ? df.mcFano : zeros(typeof(cv), m)
-    @tasks for i in findall(do_fano) ## again, faster and less alloc than mapreduce
+    @tasks for i in findall(mask) ## again, faster and less alloc than mapreduce
         acc = 0
         for (x, mu) in zip(xrows[i], erows[i])
             acc += pearson_residual2(x, mu, cv)
@@ -68,17 +75,16 @@ function quantile_null_mcFano(model::BigSurModel{T}, gene_idx::Integer) where {T
     # pval = ccdf(Normal(), min_abs_real(roots(f(i) - mcFano[i])))
 end
 
-function pearson_correlation(model::BigSurModel{T}, i1::Integer, i2::Integer)::T where T
-    mcFano, n, c = rowdata(model).mcFano, size(model)[2], cv(model)
-    xrow, erow = eachrow(measured_values(model)), eachrow(expected_values(model))
-    pres1, pres2 = Vector{T}(undef, n), Vector{T}(undef, n)
-    acc = @tasks for j in 1:n
-        @set reducer = +
-        pres1[j] = pearson_residual(xrow[i1][j], erow[i1][j], c)
-        pres2[j] = pearson_residual(xrow[i2][j], erow[i2][j], c)
-        pres1[j] * pres2[j]
+function pearson_correlation!(model::BigSurModel{T}, PCC::AbstractMatrix{T}) where T
+    (m, n), c, p = size(model), cv(model), eachcol(pearson_residual(model))
+    fano = rowdata(model).mcFano
+    @tasks for i1 in 1:m
+        @set scheduler = :greedy
+        for i2 in i1+1:m
+            then = Base.Fix2(/, (n-1) * sqrt(fano[i1] * fano[i2]))
+            PCC[i2, i1] = vmapreducethen(*, +, then, p[i1], p[i2])
+        end
     end
-    acc / (norm(pres1) * norm(pres2))
 end
 
 @inline function simulation_gene_levels(gene_totals, n)
