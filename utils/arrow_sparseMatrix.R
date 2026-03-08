@@ -4,20 +4,25 @@ library(Matrix)
 
 #' `as_arrow_table` generic method for Matrix class,
 #' stores column-wise compressed (CSC) sparse Matrix and axial metadata.
-.S3method("as_arrow_table", "Matrix", function(mat) {
+.S3method("as_arrow_table", "Matrix", function(mat, name = NA) {
   if (!is(mat, "CsparseMatrix")) mat <- as(mat, "CsparseMatrix")
   df <- tibble(
+    name = as.character(name),
     rowname = list(rownames(mat)),
     colname = list(colnames(mat)),
     rowidx = list(mat@i),
     colptr = list(mat@p),
     value = list(mat@x)
   )
+  field <- arrow::field
   ls_field <- function(t) list_of(field("item", t, nullable = FALSE))
-  scm <- schema(purrr::map2(
-    c("rowname", "colname", "rowidx", "colptr", "value"),
-    c(string(),  string(),  int32(),  int32(),  float64()) |> sapply(ls_field),
-    field, nullable = FALSE)
+  scm <- schema(c(
+    field("name", string()), # this one is nullable, others are not
+    purrr::map2(
+      c("rowname", "colname", "rowidx", "colptr", "value"),
+      c(string(),  string(),  int32(),  int32(),  float64()) |> sapply(ls_field),
+      field, nullable = FALSE
+    ))
   )
   arrow_table(df, schema = scm)
 })
@@ -43,7 +48,11 @@ read_arrow_Matrix <- function(path) {
     m
   }
   if (nrow(tab) > 1) {
-    lapply(seq_len(nrow(tab)), single_mat)
+    mats <- lapply(seq_len(nrow(tab)), single_mat)
+    if ("name" %in% names(tab)) {
+      names(mats) <- tab$name
+    }
+    mats
   } else {
     single_mat()
   }
@@ -57,13 +66,18 @@ read_arrow_Matrix <- function(path) {
 #' * M@i, M@p, M@x   ==> rowidx, colptr, value, respectively
 #' In case of multiple instances, this stores each instance as a row,
 #' and each Matrix can have different dimensions.
-write_arrow_Matrix <- function(mats, path, compression_level = 5) {
+write_arrow_Matrix <- function(mats, path, name = NA, compression_level = 5) {
   stopifnot(any(c("list", "Matrix") %in% is(mats)))
   if (is(mats, "list")) {
     stopifnot(all(sapply(mats, is, "Matrix")))
-    tab <- do.call(rbind, lapply(mats, as_arrow_table))
+    if (is.null(names(mats))) {
+      tabs <- lapply(mats, as_arrow_table)
+    } else {
+      tabs <- mapply(as_arrow_table, mats, names(mats))
+    }
+    tab <- do.call(rbind, tabs)
   } else { # "Matrix" %in% is(mats)
-    tab <- as_arrow_table(mats)
+    tab <- as_arrow_table(mats, name)
   }
   write_ipc_file(tab, path, compression = "zstd", compression_level = compression_level)
 }
