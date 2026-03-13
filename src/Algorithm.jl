@@ -34,7 +34,7 @@ function apply_cv!(model::BigSurModel{T}, cv::U; ## cv can be a ForwardDiff.Dual
     slope
 end
 
-find_cv!(model::BigSurModel{<:Real}) = find_zero(Base.Fix1(apply_cv!, model), 1)
+find_cv!(model::BigSurModel{<:Real}) = find_zero(Base.Fix1(apply_cv!, model), 1, Order16())
 find_cv!(model::BigSurModel{<:Interval}) = begin
     region = interval(0, 1)
     rs = root_region.(roots(Base.Fix1(apply_cv!, model), region))

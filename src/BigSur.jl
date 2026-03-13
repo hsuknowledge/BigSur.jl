@@ -9,7 +9,7 @@ using VectorizedReduction: vmapreducethen
 using LazyArrays: LazyArray, @~
 using StatsBase: median, mad
 using CurveFit: CurveFitProblem, PowerCurveFitAlgorithm, solve, coef
-using Roots: find_zero
+using Roots: find_zero, Order16
 using IntervalRootFinding: roots, Bisection, root_region
 using Combinatorics: stirlings2
 using MultipleTesting: adjust, BenjaminiHochberg
@@ -33,12 +33,13 @@ function findVariableGenes(mat::AbstractMatrix{<:Real}, names;
     apply_cv!(model, best_cv; to_all = true)
     df = rowdata(model)
     try
-        df[!, :quantile] = quant = map(1:m) do i
+        quant = map(1:m) do i
             f = quantile_null_mcFano(model, i) - df.mcFano[i]
             r = roots(f, interval(-500, 500))
             idx_min = sortperm(@. mid(abs(root_region(r))))[1]
             root_region(r[idx_min])
         end
+        df[!, :quantile] = mid.(quant)
         df[!, :p_val] = pval = map(q -> mid(normccdf(q)), quant)
         df[!, :padj_BH] = padj = adjust(pval, BenjaminiHochberg())
         df[!, :highly_variable] = hvg = @. df.mcFano >= min_fano && padj <= FDR
