@@ -24,16 +24,16 @@ include("Algorithm.jl")
 include("IntervalExtra.jl") ## interval-valued normccdf function
 
 function findVariableGenes(mat::AbstractMatrix{<:Real}, names;
+                           min_genes = 6,
                            mean_lowbound = 0.1, mean_highbound = 100,
                            min_fano = 1.5, FDR = 0.05)
-    m, n = size(mat)
-    model = BigSurModel(mat, names)
+    model = BigSurModel(mat, names; min_genes)
     set_cv_fitting_range!(model, mean_lowbound, mean_highbound)
     best_cv = find_cv!(model)
     apply_cv!(model, best_cv; to_all = true)
     df = rowdata(model)
     try
-        quant = map(1:m) do i
+        quant = map(1:size(model)[1]) do i
             f = quantile_null_mcFano(model, i) - df.mcFano[i]
             r = roots(f, interval(-500, 500))
             idx_min = sortperm(@. mid(abs(root_region(r))))[1]

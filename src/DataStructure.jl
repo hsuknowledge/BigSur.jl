@@ -7,15 +7,18 @@ struct BigSurModel{T<:Real, A<:AbstractMatrix{T}}
     pearson_residual::Matrix{T}
 end
 
-function BigSurModel(mat::AbstractMatrix{T}, names::AbstractVector) where {T<:Real}
+function BigSurModel(mat_in::AbstractMatrix{T}, names::AbstractVector;
+                     min_genes::Int = 6) where {T<:Real}
+    n_gene = rowsum(mat_in .> 0)
+    g_filter = n_gene .>= min_genes
+    mat = mat_in[g_filter, :]
     m, n = size(mat)
     @info "Creating analysis model for " * string(size(mat)) * " genes and cells."
     rsum = rowsum(mat)
     csum = colsum(mat)
-    @assert all(rsum .> 0) "Some genes have zero counts. Please remove them."
     @assert all(csum .> 0) "Some cells have zero counts. Please remove them."
     rmean = rsum ./ n
-    df = DataFrame(names = names, gene_means = rmean,
+    df = DataFrame(names = names[g_filter], gene_means = rmean,
                    fit_cv = falses(m), cv = zeros(T, m), mcFano = zeros(T, m),
                    null_mu = zeros(T, m), null_sd = zeros(T, m),
                    null_skew = zeros(T, m), null_ekur = zeros(T, m),
