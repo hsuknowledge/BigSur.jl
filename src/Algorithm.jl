@@ -9,7 +9,8 @@ function apply_cv!(model::BigSurModel{T}, cv::U; ## cv can be a ForwardDiff.Dual
     if to_all
         @tasks for i in 1:m
             map!(Base.Fix{3}(pearson_residual, cv), pcols[i], xrows[i], erows[i])
-            df.mcFano[i] = vmapreducethen(abs2, +, Base.Fix2(/, n - 1), pcols[i])
+            df.sum_res[i] = vvmapreduce(abs2, +, pcols[i])
+            df.mcFano[i] = df.sum_res[i] / (n - 1)
         end
         return cv
     end
@@ -34,7 +35,7 @@ function apply_cv!(model::BigSurModel{T}, cv::U; ## cv can be a ForwardDiff.Dual
     slope
 end
 
-find_cv!(model::BigSurModel{<:Real}) = find_zero(Base.Fix1(apply_cv!, model), 1, Order16())
+find_cv!(model::BigSurModel{<:Real}) = find_zero(Base.Fix1(apply_cv!, model), 1)
 find_cv!(model::BigSurModel{<:Interval}) = begin
     region = interval(0, 1)
     rs = root_region.(roots(Base.Fix1(apply_cv!, model), region))
@@ -47,7 +48,7 @@ find_cv!(model::BigSurModel{<:Interval}) = begin
     hull(rs...; dec = :auto)
 end
 
-function quantile_null_mcFano(model::BigSurModel{T}, gene_idx::Integer) where {T<:Real}
+function get_cumulants(model::BigSurModel{T}, g::Integer) where {T<:Real}
     n, c, emat, df = size(model)[2], cv(model), expected_values(model), rowdata(model)
     chi_pow = chipowers_table(8, c)
     S2 = stirlings2_table(8)
@@ -58,21 +59,24 @@ function quantile_null_mcFano(model::BigSurModel{T}, gene_idx::Integer) where {T
             m_pow, r = Vector{T}(undef, 9), Vector{T}(undef, 9)
             e = Vector{T}(undef, 4)
         end
-        m_pow .= emat[gene_idx, j].^(0:8)
+        m_pow .= emat[g, j].^(0:8)
         map!(k -> poisson_lognormal_moment(k, m_pow, chi_pow, S2), r, 0:8)
         map!(k -> pearson_residual2_moment(k, m_pow, c, r, B), e, 1:4)
         noncentral_moment_to_cumulant(e)
     end
-    df.null_mu[gene_idx] = μ = k[1] / (n - 1) # == n/(n-1)
-    df.null_sd[gene_idx] = sd = sqrt(k[2]) / (n - 1)
-    # Higher moments (γ) in CF expansion ignore 1/(n-1)^k in the actual Fano cumulants
-    df.null_skew[gene_idx] = S = k[3] / k[2]^1.5
-    df.null_ekur[gene_idx] = K = k[4] / k[2]^2
-    (Sc, Kc) = input_correction_Maillard(S, K) # Maillard's CF input correction (2018)
-    if isnothing(Sc) return quantile_Cornish_Fisher(μ, sd, S, K) end
-    df.null_valid[gene_idx] = validity_Cornish_Fisher(Sc, Kc)
-    quantile_Cornish_Fisher(μ, sd, Sc, Kc)
-    # pval = ccdf(Normal(), min_abs_real(roots(f(i) - mcFano[i])))
+    df.k1[g], df.k2[g], df.k3[g], df.k4[g] = k
+end
+
+function quantile_polynomial(k1, k2, k3, k4) # input cumulants
+    n = k1
+    μ = k1 / (n - 1)
+    σ = sqrt(k2) / (n - 1)
+    S = k3 / k2^1.5
+    K = k4 / k2^2
+    Sc, Kc = input_correction_Maillard(S, K) # Some S and K are not covered
+    !isnothing(Sc) || return quantile_Cornish_Fisher(μ, σ, S, K)
+    quantile_Cornish_Fisher(μ, σ, Sc, Kc)
+    # pval = ccdf(Normal(), roots(poly - mcFano))
 end
 
 function pearson_correlation!(model::BigSurModel{T}, PCC::AbstractMatrix{T}) where T
@@ -81,8 +85,8 @@ function pearson_correlation!(model::BigSurModel{T}, PCC::AbstractMatrix{T}) whe
     @tasks for i1 in 1:m
         @set scheduler = :greedy
         for i2 in i1+1:m
-            then = Base.Fix2(/, (n-1) * sqrt(fano[i1] * fano[i2]))
-            PCC[i2, i1] = vmapreducethen(*, +, then, p[i1], p[i2])
+            den = (n-1) * sqrt(fano[i1] * fano[i2])
+            PCC[i2, i1] = vvmapreduce(*, +, p[i1], p[i2]) / den
         end
     end
 end

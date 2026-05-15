@@ -58,6 +58,12 @@ function validity_Cornish_Fisher(S, K)
     try discriminant_DZ < 0 catch; false end
 end
 
+function validity_Cornish_Fisher(k2, k3, k4) # input 2nd-4th order cumulants
+    S = k3 / k2^1.5
+    K = k4 / k2^2
+    validity_Cornish_Fisher(input_correction_Maillard(S, K)...)
+end
+
 const table_Sc = [ ## Table 4, Cases 1-5
 -1.816   -0.0189      2.111    0.172    0.00512     ## Constant
  6.812    0.161       0        0.132   -0.0240      ## S^{1/2}

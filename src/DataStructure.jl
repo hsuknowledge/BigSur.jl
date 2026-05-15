@@ -20,9 +20,8 @@ function BigSurModel(mat_in::AbstractMatrix{T}, names::AbstractVector;
     rmean = rsum ./ n
     df = DataFrame(names = names[g_filter], gene_means = rmean,
                    fit_cv = falses(m), cv = zeros(T, m), mcFano = zeros(T, m),
-                   null_mu = zeros(T, m), null_sd = zeros(T, m),
-                   null_skew = zeros(T, m), null_ekur = zeros(T, m),
-                   null_valid = falses(m))
+                   sum_res = zeros(T, m), k1 = zeros(T, m), k2 = zeros(T, m),
+                   k3 = zeros(T, m), k4 = zeros(T, m))
     pres = Matrix{T}(undef, n, m) ## note we switch to genes as columns here
     BigSurModel(mat, rsum, csum, df, Pair{T, T}[], pres)
 end
