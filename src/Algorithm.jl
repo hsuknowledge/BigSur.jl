@@ -23,7 +23,7 @@ function apply_cv!(model::BigSurModel{T}, cv::U; ## cv can be a ForwardDiff.Dual
         mcFano[i] = acc / (n - 1)
     end
     fanos = _unwrap_number.(mcFano[mask])
-    mask[mask] .&= abs.(fanos .- median(fanos)) .<= 5 * mad(fanos)
+    mask[mask] .&= abs.(fanos .- mean(fanos)) .<= 3 * std(fanos)
     prob = CurveFitProblem(df.gene_means[mask], mcFano[mask])
     sol = solve(prob, PowerCurveFitAlgorithm())
     slope = coef(sol)[1] # [slope, intercept] (y=a^x*b)

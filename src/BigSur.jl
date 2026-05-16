@@ -7,7 +7,7 @@ using DataFrames: DataFrame
 using OhMyThreads: @tasks
 using VectorizedReduction: vvmapreduce
 using LazyArrays: LazyArray, @~
-using StatsBase: median, mad
+using StatsBase: mean, std
 using CurveFit: CurveFitProblem, PowerCurveFitAlgorithm, solve, coef
 using Roots: find_zero
 using IntervalRootFinding: roots, Bisection, root_region
