@@ -31,20 +31,21 @@ function findVariableGenes(mat::AbstractMatrix{<:Real}, names;
     set_cv_fitting_range!(model, mean_lowbound, mean_highbound)
     best_cv = find_cv!(model)
     apply_cv!(model, best_cv; to_all = true)
-    df = rowdata(model)
+    gs = genes(model)
+    df = view(rowdata(model), gs, :)
     try
-        quant = map(1:size(model)[1]) do i
-            cumulants = get_cumulants(model, i)
+        quant = map(1:length(gs)) do i
+            cumulants = get_cumulants(model, gs[i])
             f = quantile_polynomial(cumulants...) - df.mcFano[i]
             r = roots(f, interval(-500, 500))
             idx_min = sortperm(@. mid(abs(root_region(r))))[1]
             root_region(r[idx_min])
         end
-        df[!, :null_valid] = validity_Cornish_Fisher.(df.k2, df.k3, df.k4)
-        df[!, :quantile] = mid.(quant)
-        df[!, :p_val] = pval = map(q -> mid(normccdf(q)), quant)
-        df[!, :padj_BH] = padj = adjust(pval, BenjaminiHochberg())
-        df[!, :highly_variable] = hvg = @. df.mcFano >= min_fano && padj <= FDR
+        df[:, :null_valid] .= validity_Cornish_Fisher.(df.k2, df.k3, df.k4)
+        df[:, :quantile] .= mid.(quant)
+        df[:, :p_val] .= pval = map(q -> mid(normccdf(q)), quant)
+        df[:, :padj_BH] .= padj = adjust(pval, BenjaminiHochberg())
+        df[:, :highly_variable] .= hvg = @. df.mcFano >= min_fano && padj <= FDR
     catch e
         @warn "Some data weren't fully processed. Please check `rowdata(returned_model)`."
         @info e stacktrace()

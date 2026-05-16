@@ -1,16 +1,16 @@
 function apply_cv!(model::BigSurModel{T}, cv::U; ## cv can be a ForwardDiff.Dual
                    to_all::Bool = false)::U where {T<:Real, U<:Real}
-    df = rowdata(model)
+    df, gs = rowdata(model), genes(model)
     m, n = size(model)
     mask = copy(df.fit_cv)
     @assert sum(mask) > 0 "Run `set_cv_fitting_range!` first."
     xrows, erows = eachrow(measured_values(model)), eachrow(expected_values(model))
     pcols = eachcol(pearson_residual(model))
     if to_all
-        @tasks for i in 1:m
-            map!(Base.Fix{3}(pearson_residual, cv), pcols[i], xrows[i], erows[i])
-            df.sum_res[i] = vvmapreduce(abs2, +, pcols[i])
-            df.mcFano[i] = df.sum_res[i] / (n - 1)
+        @tasks for i in 1:length(gs)
+            map!(Base.Fix{3}(pearson_residual, cv), pcols[i], xrows[gs[i]], erows[gs[i]])
+            df.sum_res[gs[i]] = vvmapreduce(abs2, +, pcols[i])
+            df.mcFano[gs[i]] = df.sum_res[gs[i]] / (n - 1)
         end
         return cv
     end
@@ -80,12 +80,14 @@ function quantile_polynomial(k1, k2, k3, k4) # input cumulants
 end
 
 function pearson_correlation!(model::BigSurModel{T}, PCC::AbstractMatrix{T}) where T
-    (m, n), c, p = size(model), cv(model), eachcol(pearson_residual(model))
+    (m, n), c, gs = size(model), cv(model), genes(model)
+    @assert size(PCC) == (m, m)
+    p = eachcol(pearson_residual(model))
     fano = rowdata(model).mcFano
     @tasks for i1 in 1:m
         @set scheduler = :greedy
         for i2 in i1+1:m
-            den = (n-1) * sqrt(fano[i1] * fano[i2])
+            den = (n-1) * sqrt(fano[gs[i1]] * fano[gs[i2]])
             PCC[i2, i1] = vvmapreduce(*, +, p[i1], p[i2]) / den
         end
     end
