@@ -22,8 +22,8 @@ function apply_cv!(model::BigSurModel{T}, cv::U; ## cv can be a ForwardDiff.Dual
         end
         mcFano[i] = acc / (n - 1)
     end
-    fanos = _unwrap_number.(mcFano[mask])
-    mask[mask] .&= abs.(fanos .- mean(fanos)) .<= 3 * std(fanos)
+    #fanos = _unwrap_number.(mcFano[mask])
+    #mask[mask] .&= abs.(fanos .- mean(fanos)) .<= 3 * std(fanos)
     prob = CurveFitProblem(df.gene_means[mask], mcFano[mask])
     sol = solve(prob, PowerCurveFitAlgorithm())
     slope = coef(sol)[1] # [slope, intercept] (y=a^x*b)
@@ -67,31 +67,19 @@ function get_cumulants(model::BigSurModel{T}, g::Integer) where {T<:Real}
     df.k1[g], df.k2[g], df.k3[g], df.k4[g] = k
 end
 
-function quantile_polynomial(k1, k2, k3, k4) # input cumulants
-    n = k1
-    μ = k1 / (n - 1)
-    σ = sqrt(k2) / (n - 1)
-    S = k3 / k2^1.5
-    K = k4 / k2^2
-    Sc, Kc = input_correction_Maillard(S, K) # Some S and K are not covered
-    !isnothing(Sc) || return quantile_Cornish_Fisher(μ, σ, S, K)
-    quantile_Cornish_Fisher(μ, σ, Sc, Kc)
-    # pval = ccdf(Normal(), roots(poly - mcFano))
-end
-
-function pearson_correlation!(model::BigSurModel{T}, PCC::AbstractMatrix{T}) where T
-    (m, n), c, gs = size(model), cv(model), genes(model)
-    @assert size(PCC) == (m, m)
-    p = eachcol(pearson_residual(model))
-    fano = rowdata(model).mcFano
-    @tasks for i1 in 1:m
-        @set scheduler = :greedy
-        for i2 in i1+1:m
-            den = (n-1) * sqrt(fano[gs[i1]] * fano[gs[i2]])
-            PCC[i2, i1] = vvmapreduce(*, +, p[i1], p[i2]) / den
-        end
-    end
-end
+# You just compute tcrossprod of unit_residuals, bruh
+#function pearson_correlation!(model::BigSurModel{T}, PCC::AbstractMatrix{T}) where T
+#    (m, n), gs, p = size(model), genes(model), eachcol(pearson_residual(model))
+#    @assert size(PCC) == (m, m)
+#    sum_res2 = rowdata(model).sum_res
+#    @tasks for i1 in 1:m
+#        @set scheduler = :greedy
+#        for i2 in i1+1:m
+#            den = sqrt(sum_res2[gs[i1]] * sum_res2[gs[i2]])
+#            PCC[i2, i1] = vvmapreduce(*, +, p[i1], p[i2]) / den
+#        end
+#    end
+#end
 
 @inline function simulation_gene_levels(gene_totals, n)
     a = max(2, minimum(gene_totals))

@@ -48,3 +48,14 @@ second order. A correction is needed for us to target the resulting parameters.
 """
 @inline quantile_Cornish_Fisher(μ, σc, Sc, Kc) =
     μ + σc / sqrt(m2_Cornish_Fisher(Sc, Kc)) * (He1 + Sc*h1 + Kc*h2 + Sc^2*h11)
+
+function quantile_polynomial(k1, k2, k3, k4) # input cumulants
+    n = k1
+    μ = k1 / (n - 1)
+    σ = sqrt(k2) / (n - 1)
+    S = k3 / k2^1.5
+    K = k4 / k2^2
+    Sc, Kc = input_correction_Maillard(S, K)
+    !isnothing(Sc) || return quantile_Cornish_Fisher(μ, σ, S, K)
+    quantile_Cornish_Fisher(μ, σ, Sc, Kc)
+end

@@ -44,7 +44,7 @@ pearson_residual(model::BigSurModel) = model.pearson_residual
 function expected_values(model::BigSurModel{T},
                          gene_totals::AbstractVector{T} = rowsum(model)
                         ) where {T<:Real}
-    csum, total = colsum(model), sum(colsum(model))
+    csum, total = colsum(model), sum(gene_totals)
     LazyArray(@~ gene_totals * csum' ./ total)
 end
 

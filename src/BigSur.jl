@@ -13,7 +13,7 @@ using Roots: find_zero
 using IntervalRootFinding: roots, Bisection, root_region
 using Combinatorics: stirlings2
 using MultipleTesting: adjust, BenjaminiHochberg
-using Distributions: LogNormal, Poisson
+using Distributions: LogNormal, Poisson, Normal, ccdf
 
 include("DataStructure.jl")
 include("IntervalPolynomial.jl") ## for Cornish-Fisher expansion
@@ -24,12 +24,15 @@ include("Algorithm.jl")
 include("IntervalExtra.jl") ## interval-valued normccdf function
 
 function findVariableGenes(mat::AbstractMatrix{<:Real}, names;
-                           min_genes = 6,
-                           mean_lowbound = 0.1, mean_highbound = 100,
+                           min_genes = 6, set_gene_totals = nothing,
+                           cv_set = nothing, fitcv_genes = nothing,
+                           mean_lowbound = 0.1, mean_highbound = Inf, #100,
                            min_fano = 1.5, FDR = 0.05)
     model = BigSurModel(mat, names; min_genes)
+    model.gene_totals .= isnothing(set_gene_totals) ? model.gene_totals : set_gene_totals
     set_cv_fitting_range!(model, mean_lowbound, mean_highbound)
-    best_cv = find_cv!(model)
+    rowdata(model).fit_cv .= isnothing(fitcv_genes) ? rowdata(model).fit_cv : fitcv_genes
+    best_cv = isnothing(cv_set) ? find_cv!(model) : cv_set
     apply_cv!(model, best_cv; to_all = true)
     gs = genes(model)
     df = view(rowdata(model), gs, :)
